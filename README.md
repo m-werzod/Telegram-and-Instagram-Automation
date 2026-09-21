@@ -48,7 +48,7 @@ webhook → verify (HMAC / secret token) → dedupe → persist event → ACK im
 
 ## Quick start (development)
 
-Prerequisites: Node.js ≥ 20, pnpm, Docker (for Postgres/Redis) — or any Postgres 14+
+Prerequisites: Node.js ≥ 22.9, pnpm, Docker (for Postgres/Redis) — or any Postgres 14+
 with the `vector` extension.
 
 ```bash

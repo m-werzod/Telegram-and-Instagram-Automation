@@ -90,6 +90,13 @@ export async function runAgentPipeline(input: PipelineInput): Promise<PipelineOu
     take: HISTORY_LIMIT,
   });
   const history = historyRows.reverse().map((m) => ({ role: m.role, content: m.content }));
+  // Handlers persist the inbound message BEFORE running the pipeline, so the
+  // newest history row is the current message — drop it here or the model
+  // would see every message twice (history turn + <current_user_message>).
+  const last = history[history.length - 1];
+  if (last && last.role === 'USER' && last.content === input.inboundText) {
+    history.pop();
+  }
 
   // Knowledge retrieval — semantic, bounded, never the whole KB (spec §8).
   let knowledge: RetrievedChunk[] = [];
@@ -207,15 +214,26 @@ export async function runAgentPipeline(input: PipelineInput): Promise<PipelineOu
 
   if (input.lead) {
     const statusSuggestion = guardStatusTransition(input.lead.status, decision.leadStatusSuggestion);
+    // Low-signal intents must not clobber a lead's stored classification
+    // (e.g. 'purchase_intent' being overwritten by a later 'greeting').
+    const meaningfulIntent = ['greeting', 'irrelevant', 'other', 'spam'].includes(decision.intent)
+      ? undefined
+      : decision.intent;
+    // Clamp model-sourced tags to the tool contract (≤20 tags, ≤50 chars each)
+    // so an overlong tag can never invalidate the whole lead update.
+    const tags = decision.tags
+      .map((t) => t.trim().slice(0, 50))
+      .filter(Boolean)
+      .slice(0, 20);
     const hasLeadChange =
       decision.leadUpdate ||
-      decision.tags.length > 0 ||
+      tags.length > 0 ||
       decision.leadScore !== null ||
       statusSuggestion ||
-      decision.intent ||
+      meaningfulIntent ||
       decision.detectedLanguage;
     if (hasLeadChange) {
-      await executeTool(
+      const result = await executeTool(
         'updateLead',
         {
           leadId: input.lead.id,
@@ -224,15 +242,18 @@ export async function runAgentPipeline(input: PipelineInput): Promise<PipelineOu
             phone: decision.leadUpdate?.phone ?? undefined,
             email: decision.leadUpdate?.email ?? undefined,
             language: decision.detectedLanguage ?? undefined,
-            intent: decision.intent,
+            intent: meaningfulIntent,
             status: statusSuggestion ?? undefined,
             score: decision.leadScore ?? undefined,
-            addTags: decision.tags,
+            addTags: tags,
             qualification: pickQualification(decision),
           },
         },
         toolCtx,
       );
+      if (!result.ok) {
+        log.warn({ error: result.error }, 'updateLead tool failed — lead fields not applied');
+      }
     }
     if (decision.internalNote) {
       await executeTool('createCRMNote', { leadId: input.lead.id, content: decision.internalNote }, toolCtx);

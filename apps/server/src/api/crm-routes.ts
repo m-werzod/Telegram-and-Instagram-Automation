@@ -9,6 +9,9 @@ import { requireAuth, tenantOf } from './middleware.js';
 export async function crmRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('preHandler', requireAuth);
 
+  const leadStatusFilter = z.enum(['NEW', 'OPEN', 'QUALIFIED', 'CONVERTED', 'LOST', 'SPAM']);
+  const sourceFilter = z.enum(['INSTAGRAM', 'TELEGRAM']);
+
   app.get<{
     Querystring: { status?: string; source?: string; q?: string; page?: string; pageSize?: string };
   }>('/api/leads', async (req) => {
@@ -16,8 +19,17 @@ export async function crmRoutes(app: FastifyInstance): Promise<void> {
     const page = Math.max(1, Number(req.query.page) || 1);
     const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 25));
     const where: Record<string, unknown> = { tenantId, mergedIntoId: null };
-    if (req.query.status) where.status = req.query.status;
-    if (req.query.source) where.source = req.query.source;
+    // Validate enum filters — raw values reaching Prisma throw as 500s.
+    if (req.query.status) {
+      const parsed = leadStatusFilter.safeParse(req.query.status);
+      if (!parsed.success) throw new ValidationError('Invalid status filter');
+      where.status = parsed.data;
+    }
+    if (req.query.source) {
+      const parsed = sourceFilter.safeParse(req.query.source);
+      if (!parsed.success) throw new ValidationError('Invalid source filter');
+      where.source = parsed.data;
+    }
     if (req.query.q) {
       where.OR = [
         { name: { contains: req.query.q, mode: 'insensitive' } },

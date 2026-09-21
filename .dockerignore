@@ -1,0 +1,15 @@
+# Never copy host installs/builds into the image — the image installs and
+# builds for its own platform (host node_modules contain Windows binaries
+# and pnpm symlinks that break the Linux build).
+node_modules
+**/node_modules
+**/dist
+apps/server/public/dashboard
+data
+coverage
+.git
+
+# Secrets never enter the build context.
+.env
+.env.*
+!.env.example

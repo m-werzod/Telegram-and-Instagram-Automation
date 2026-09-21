@@ -10,6 +10,8 @@ export function makeTestEnv(overrides: Partial<Env> = {}): Env {
     HOST: '127.0.0.1',
     APP_URL: 'https://test.example.com',
     LOG_LEVEL: 'error',
+    TRUST_PROXY: false,
+    UPLOADS_DIR: undefined,
     DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgresql://test:test@localhost:5432/test',
     REDIS_URL: undefined,
     ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,

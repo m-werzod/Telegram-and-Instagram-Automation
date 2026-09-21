@@ -120,6 +120,20 @@ export async function applyBusinessRules(params: {
   return { allowSend: !!(reply || privateReplyText), reply, privateReplyText };
 }
 
+/**
+ * True when a comment carries no answerable content: empty, or only
+ * @mentions, emoji, punctuation and whitespace (spec: skipTrivialComments).
+ */
+export function isTrivialComment(text: string): boolean {
+  const stripped = text
+    .replace(/@[\w.]+/g, '')
+    // Emoji_Component covers ZWJ, variation selectors, keycaps and modifiers.
+    .replace(/\p{Extended_Pictographic}/gu, '')
+    .replace(/\p{Emoji_Component}/gu, '')
+    .replace(/[\s\p{P}\p{S}]+/gu, '');
+  return stripped.length === 0;
+}
+
 export function truncateAtBoundary(text: string, max: number): string {
   if (text.length <= max) return text;
   const slice = text.slice(0, max - 1);

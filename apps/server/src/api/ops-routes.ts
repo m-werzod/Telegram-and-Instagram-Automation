@@ -1,7 +1,27 @@
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import { getPrisma } from '../db/client.js';
-import { NotFoundError } from '../lib/errors.js';
+import { NotFoundError, ValidationError } from '../lib/errors.js';
 import { requireAuth, tenantOf } from './middleware.js';
+
+const eventStatusFilter = z.enum([
+  'RECEIVED',
+  'ENQUEUED',
+  'PROCESSING',
+  'PROCESSED',
+  'SKIPPED',
+  'FAILED',
+  'DEAD_LETTER',
+]);
+const channelFilter = z.enum(['INSTAGRAM', 'TELEGRAM']);
+const handoffStatusFilter = z.enum(['OPEN', 'RESOLVED']);
+
+function parseFilter<T>(schema: z.ZodType<T>, value: string | undefined, name: string): T | undefined {
+  if (!value) return undefined;
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) throw new ValidationError(`Invalid ${name} filter`);
+  return parsed.data;
+}
 
 /**
  * Operations API: logs & observability (spec §26, §32), human handoffs
@@ -17,8 +37,10 @@ export async function opsRoutes(app: FastifyInstance): Promise<void> {
       const tenantId = tenantOf(req);
       const page = Math.max(1, Number(req.query.page) || 1);
       const where: Record<string, unknown> = { tenantId };
-      if (req.query.status) where.status = req.query.status;
-      if (req.query.channel) where.channel = req.query.channel;
+      const status = parseFilter(eventStatusFilter, req.query.status, 'status');
+      const channel = parseFilter(channelFilter, req.query.channel, 'channel');
+      if (status) where.status = status;
+      if (channel) where.channel = channel;
       const events = await getPrisma().webhookEvent.findMany({
         where: where as never,
         orderBy: { receivedAt: 'desc' },
@@ -87,8 +109,9 @@ export async function opsRoutes(app: FastifyInstance): Promise<void> {
   // ── Handoffs ──────────────────────────────────────────────────────────────
   app.get<{ Querystring: { status?: string } }>('/api/handoffs', async (req) => {
     const tenantId = tenantOf(req);
+    const status = parseFilter(handoffStatusFilter, req.query.status, 'status');
     const handoffs = await getPrisma().humanHandoff.findMany({
-      where: { tenantId, ...(req.query.status ? { status: req.query.status as never } : {}) },
+      where: { tenantId, ...(status ? { status } : {}) },
       orderBy: { createdAt: 'desc' },
       take: 100,
       include: {

@@ -27,6 +27,7 @@ const connection = {
   id: CONNECTION_ID,
   tenantId: 'tenant-1',
   channel: 'TELEGRAM',
+  externalAccountId: '999888777',
   webhookSecret: SECRET,
 };
 
@@ -141,7 +142,7 @@ describe('Telegram webhook routes', () => {
       updateEvent.mockResolvedValue({ id: 'evt-1' });
     });
 
-    it('ACKs 200, persists the event with eventKey <connectionId>:<update_id>, and enqueues a job', async () => {
+    it('ACKs 200, persists the event with eventKey <connectionId>:<botId>:<update_id>, and enqueues a job', async () => {
       const res = await inject({ secret: SECRET });
 
       expect(res.statusCode).toBe(200);
@@ -158,7 +159,7 @@ describe('Telegram webhook routes', () => {
         };
       };
       expect(createArg.data.channel).toBe('TELEGRAM');
-      expect(createArg.data.eventKey).toBe(`${CONNECTION_ID}:${update.update_id}`);
+      expect(createArg.data.eventKey).toBe(`${CONNECTION_ID}:999888777:${update.update_id}`);
       expect(createArg.data.tenantId).toBe('tenant-1');
       expect(createArg.data.status).toBe('RECEIVED');
       expect(createArg.data.payload.connectionId).toBe(CONNECTION_ID);

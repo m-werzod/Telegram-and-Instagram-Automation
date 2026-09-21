@@ -1,12 +1,13 @@
 import type { WebhookEvent } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { getPrisma } from '../../../db/client.js';
-import { errorMessage } from '../../../lib/errors.js';
+import { AppError, errorMessage, isRetryable } from '../../../lib/errors.js';
 import { childLogger } from '../../../lib/logger.js';
 import { findOrCreateLead } from '../../crm/service.js';
 import { runAgentPipeline } from '../../engine/pipeline.js';
+import { claimIdempotency, releaseIdempotency } from '../shared/idempotency.js';
 import { getTelegramClient } from './service.js';
-import type { TgUpdate } from './client.js';
+import { splitMessage, TELEGRAM_MAX_MESSAGE, type TgUpdate } from './client.js';
 
 /**
  * Telegram event processing (spec §14): update → lead → conversation →
@@ -119,8 +120,8 @@ export async function processTelegramEvent(event: WebhookEvent): Promise<void> {
   });
 
   if (outcome.status === 'failed') {
-    await markEvent(event.id, 'FAILED', outcome.error ?? 'pipeline failed');
-    return;
+    // Retryable: the queue re-runs this event; sends below are idempotency-guarded.
+    throw new AppError(outcome.error ?? 'agent pipeline failed', { retryable: true });
   }
 
   if (outcome.status === 'replied' && outcome.verdict?.reply) {
@@ -130,16 +131,30 @@ export async function processTelegramEvent(event: WebhookEvent): Promise<void> {
     } catch {
       // typing indicator is cosmetic — ignore failures
     }
-    const sent = await client.sendMessage(message.chat.id, outcome.verdict.reply);
-    for (const s of sent) {
+    // Per-part idempotency: if part 2 of a long reply hits flood control, the
+    // queue retry resumes at the failed part instead of re-sending part 1.
+    const parts = splitMessage(outcome.verdict.reply, TELEGRAM_MAX_MESSAGE);
+    for (let i = 0; i < parts.length; i++) {
+      const key = `tg_reply:${connection.id}:${update.update_id}:${i}`;
+      if (!(await claimIdempotency(tenantId, key))) continue;
+      let sent;
+      try {
+        sent = await client.sendMessage(message.chat.id, parts[i]!);
+      } catch (err) {
+        if (isRetryable(err)) {
+          await releaseIdempotency(tenantId, key);
+        }
+        throw err;
+      }
+      const s = sent[0];
       await prisma.conversationMessage.create({
         data: {
           conversationId: conversation.id,
           tenantId,
           direction: 'OUTBOUND',
           role: 'AGENT',
-          content: s.text ?? outcome.verdict.reply,
-          externalMessageId: String(s.message_id),
+          content: s?.text ?? parts[i]!,
+          externalMessageId: s ? String(s.message_id) : `tg:${update.update_id}:${i}`,
           metadata: { aiExecutionId: outcome.aiExecutionId ?? null },
         },
       });

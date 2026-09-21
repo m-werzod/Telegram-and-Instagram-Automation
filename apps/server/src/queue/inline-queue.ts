@@ -1,5 +1,5 @@
 import { getLogger } from '../lib/logger.js';
-import { isRetryable, errorMessage } from '../lib/errors.js';
+import { isRetryable, errorMessage, RateLimitedError } from '../lib/errors.js';
 import {
   type EnqueueOptions,
   type JobHandler,
@@ -121,7 +121,11 @@ export class InlineQueue implements JobQueue {
     } catch (err) {
       const attempt = job.attempt + 1;
       if (attempt < RETRY_ATTEMPTS && isRetryable(err)) {
-        const delayMs = RETRY_BACKOFF_MS * 2 ** job.attempt;
+        // Honor the platform's flood-control hint (Telegram retry_after /
+        // Instagram rate limits): retrying earlier is a guaranteed 429.
+        const backoff = RETRY_BACKOFF_MS * 2 ** job.attempt;
+        const hint = err instanceof RateLimitedError ? (err.retryAfterMs ?? 0) : 0;
+        const delayMs = Math.max(backoff, hint);
         log.warn({ err: errorMessage(err), delayMs }, 'job failed; scheduling retry');
         const timer = setTimeout(() => {
           this.timers.delete(timer);

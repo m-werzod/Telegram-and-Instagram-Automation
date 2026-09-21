@@ -3,7 +3,7 @@ import { disconnectPrisma, getPrisma } from './db/client.js';
 import { errorMessage } from './lib/errors.js';
 import { initLogger } from './lib/logger.js';
 import { initAI } from './modules/ai/index.js';
-import { recoverStuckEvents } from './modules/webhooks/service.js';
+import { pruneOldRecords, recoverStuckEvents } from './modules/webhooks/service.js';
 import { pruneExpiredSessions } from './modules/auth/service.js';
 import { createQueue } from './queue/index.js';
 import { registerWorkers } from './workers/webhook-processor.js';
@@ -37,11 +37,14 @@ async function main(): Promise<void> {
     logger.warn({ err: errorMessage(err) }, 'env auto-connect failed'),
   );
 
-  // Housekeeping: session pruning + periodic connection health checks.
+  // Housekeeping: session pruning, connection health checks, stuck-event
+  // recovery (the durable retry backstop), and retention pruning.
   const housekeeping = setInterval(
     () => {
       void pruneExpiredSessions().catch(() => undefined);
       void runHealthChecks().catch(() => undefined);
+      void recoverStuckEvents().catch(() => undefined);
+      void pruneOldRecords().catch(() => undefined);
     },
     15 * 60 * 1000,
   );

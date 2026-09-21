@@ -14,6 +14,17 @@ const envSchema = z.object({
   /** Public HTTPS base URL of this deployment (used to build webhook callback URLs). */
   APP_URL: z.string().url().optional(),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+  /**
+   * Set to true ONLY when the app runs behind a reverse proxy that overwrites
+   * X-Forwarded-For. When exposed directly, leaving this false stops clients
+   * spoofing their IP to bypass rate limits (e.g. the login throttle).
+   */
+  TRUST_PROXY: z
+    .string()
+    .optional()
+    .transform((v) => v === 'true' || v === '1'),
+  /** Directory for uploaded knowledge documents (default: <cwd>/data/uploads). */
+  UPLOADS_DIR: z.string().optional(),
 
   DATABASE_URL: z.string().min(1),
   /** Optional. When absent, jobs run on the in-process inline queue (no Redis required). */

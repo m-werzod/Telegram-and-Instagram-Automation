@@ -1,11 +1,12 @@
 import type { ChannelConnection, WebhookEvent } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
-import { Prisma } from '@prisma/client';
 import { getPrisma } from '../../../db/client.js';
-import { errorMessage } from '../../../lib/errors.js';
+import { AppError, errorMessage, isRetryable } from '../../../lib/errors.js';
 import { childLogger } from '../../../lib/logger.js';
 import { findOrCreateLead } from '../../crm/service.js';
+import { isTrivialComment, parseAgentSettings } from '../../engine/business-rules.js';
 import { runAgentPipeline } from '../../engine/pipeline.js';
+import { claimIdempotency, releaseIdempotency } from '../shared/idempotency.js';
 import { getInstagramClient } from './service.js';
 
 /**
@@ -143,6 +144,12 @@ async function processComment(
     return;
   }
 
+  // Emoji/mention-only comments: recorded above, but no AI run or reply.
+  if (parseAgentSettings(agent).skipTrivialComments && isTrivialComment(text)) {
+    await markEvent(event.id, 'SKIPPED', 'trivial comment (mentions/emoji only)');
+    return;
+  }
+
   const outcome = await runAgentPipeline({
     tenantId,
     tenantName: tenant.name,
@@ -159,8 +166,9 @@ async function processComment(
   });
 
   if (outcome.status === 'failed') {
-    await markEvent(event.id, 'FAILED', outcome.error ?? 'pipeline failed');
-    return;
+    // Retryable: the queue re-runs this event (message already persisted; sends
+    // below are idempotency-guarded), then dead-letters after bounded attempts.
+    throw new AppError(outcome.error ?? 'agent pipeline failed', { retryable: true });
   }
 
   const client = getInstagramClient(connection);
@@ -168,8 +176,11 @@ async function processComment(
   const verdict = outcome.verdict;
 
   // Private reply first (it is the scarce, one-shot resource — spec §11).
-  if (decision?.sendPrivateReply && verdict?.privateReplyText && !isLive) {
-    const claimed = await claimIdempotency(tenantId, `ig_private_reply:${commentId}`);
+  // Live comments: private replies are the ONLY supported response and work
+  // during the broadcast; public /replies is rejected for live video.
+  if (decision?.sendPrivateReply && verdict?.privateReplyText) {
+    const key = `ig_private_reply:${commentId}`;
+    const claimed = await claimIdempotency(tenantId, key);
     if (claimed) {
       try {
         const res = await client.sendPrivateReply(commentId, verdict.privateReplyText);
@@ -186,18 +197,27 @@ async function processComment(
         });
         log.info({ commentId }, 'private reply sent');
       } catch (err) {
-        log.warn({ err: errorMessage(err) }, 'private reply failed');
+        if (isRetryable(err)) {
+          // Release the one-shot claim so the queue retry can attempt the send
+          // again — otherwise a transient IG error permanently burns the only
+          // private reply this comment will ever allow.
+          await releaseIdempotency(tenantId, key);
+          throw err;
+        }
+        log.warn({ err: errorMessage(err) }, 'private reply failed permanently');
       }
     } else {
       log.info({ commentId }, 'private reply already sent for this comment — skipped');
     }
   }
 
-  // Public reply (top-level comments only; replies-to-replies re-parent anyway).
+  // Public reply (top-level comments only; the API cannot reply to live-video comments).
   const suppressPublic =
-    decision?.sendPrivateReply && verdict?.privateReplyText && !outcome.settings.publicReplyOnPrivate;
+    isLive ||
+    (decision?.sendPrivateReply && verdict?.privateReplyText && !outcome.settings.publicReplyOnPrivate);
   if (verdict?.reply && !suppressPublic) {
-    const claimed = await claimIdempotency(tenantId, `ig_comment_reply:${commentId}`);
+    const key = `ig_comment_reply:${commentId}`;
+    const claimed = await claimIdempotency(tenantId, key);
     if (claimed) {
       try {
         const res = await client.replyToComment(commentId, verdict.reply);
@@ -214,7 +234,11 @@ async function processComment(
         });
         log.info({ commentId }, 'public comment reply sent');
       } catch (err) {
-        log.warn({ err: errorMessage(err) }, 'public comment reply failed');
+        if (isRetryable(err)) {
+          await releaseIdempotency(tenantId, key);
+          throw err;
+        }
+        log.warn({ err: errorMessage(err) }, 'public comment reply failed permanently');
       }
     } else {
       log.info({ commentId }, 'comment already replied — skipped (duplicate protection)');
@@ -349,45 +373,47 @@ async function processDm(
   });
 
   if (outcome.status === 'failed') {
-    await markEvent(event.id, 'FAILED', outcome.error ?? 'pipeline failed');
-    return;
+    throw new AppError(outcome.error ?? 'agent pipeline failed', { retryable: true });
   }
 
   if (outcome.status === 'replied' && outcome.verdict?.reply) {
-    const res = await client.sendMessage(igsid, outcome.verdict.reply);
-    await prisma.conversationMessage.create({
-      data: {
-        conversationId: conversation.id,
-        tenantId,
-        direction: 'OUTBOUND',
-        role: 'AGENT',
-        content: outcome.verdict.reply,
-        externalMessageId: res.message_id ?? `dm:${mid}:reply`,
-        metadata: { aiExecutionId: outcome.aiExecutionId ?? null },
-      },
-    });
-    await prisma.conversation.update({
-      where: { id: conversation.id },
-      data: { lastMessageAt: new Date(), agentId: agent.id },
-    });
-    log.info('dm reply sent');
+    // Idempotency: a queue retry after a partial failure must not DM the user twice.
+    const key = `ig_dm_reply:${mid}`;
+    if (await claimIdempotency(tenantId, key)) {
+      let res: { message_id?: string };
+      try {
+        res = await client.sendMessage(igsid, outcome.verdict.reply);
+      } catch (err) {
+        if (isRetryable(err)) {
+          await releaseIdempotency(tenantId, key);
+        }
+        throw err;
+      }
+      await prisma.conversationMessage.create({
+        data: {
+          conversationId: conversation.id,
+          tenantId,
+          direction: 'OUTBOUND',
+          role: 'AGENT',
+          content: outcome.verdict.reply,
+          externalMessageId: res.message_id ?? `dm:${mid}:reply`,
+          metadata: { aiExecutionId: outcome.aiExecutionId ?? null },
+        },
+      });
+      await prisma.conversation.update({
+        where: { id: conversation.id },
+        data: { lastMessageAt: new Date(), agentId: agent.id },
+      });
+      log.info('dm reply sent');
+    } else {
+      log.info('dm reply already sent for this message — skipped (retry)');
+    }
   }
 
   await markEvent(event.id, 'PROCESSED');
 }
 
 // ─────────────────────────────── shared helpers ───────────────────────────────
-
-/** One-shot side-effect claim backed by a unique constraint (spec §23). */
-async function claimIdempotency(tenantId: string, key: string): Promise<boolean> {
-  try {
-    await getPrisma().idempotencyKey.create({ data: { tenantId, key } });
-    return true;
-  } catch (err) {
-    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') return false;
-    throw err;
-  }
-}
 
 async function markEvent(
   id: string,

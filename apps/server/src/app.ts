@@ -26,7 +26,9 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 export async function buildApp(env: Env): Promise<FastifyInstance> {
   const app: FastifyInstance = Fastify({
     loggerInstance: getLogger().child({ module: 'http' }) as FastifyInstance['log'],
-    trustProxy: true,
+    // Only trust X-Forwarded-For behind a real reverse proxy — otherwise
+    // clients could spoof req.ip and rotate past per-IP rate limits.
+    trustProxy: env.TRUST_PROXY,
     bodyLimit: 25 * 1024 * 1024,
   });
 

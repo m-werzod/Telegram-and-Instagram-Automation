@@ -63,46 +63,63 @@ export async function instagramWebhookRoutes(app: FastifyInstance): Promise<void
       return reply.code(200).send(); // not for us; ack to stop retries
     }
 
+    // Meta batches up to 1000 updates per POST and expects a 200 within ~5s.
+    // Lookups are memoized per account id and entries persist in parallel, so
+    // latency is bounded by the slowest entry, not the sum of all of them.
     const prisma = getPrisma();
-    for (const entry of body.entry) {
-      const connection = await prisma.channelConnection.findFirst({
-        where: { channel: 'INSTAGRAM', externalAccountId: String(entry.id) },
-      });
-      const tenantId = connection?.tenantId ?? null;
-      if (tenantId) {
-        // First verified delivery proves the Meta dashboard config works.
-        await markInstagramWebhookVerified(tenantId).catch(() => undefined);
-      }
+    const connectionCache = new Map<string, Promise<{ id: string; tenantId: string } | null>>();
+    const verifiedTenants = new Set<string>();
 
-      for (const change of entry.changes ?? []) {
-        if (change.field !== 'comments' && change.field !== 'live_comments') continue;
-        const commentId = String((change.value as { id?: unknown }).id ?? '');
-        if (!commentId) continue;
-        await recordAndEnqueueEvent({
-          channel: 'INSTAGRAM',
-          eventKey: `comment:${commentId}`,
-          tenantId,
-          payload: { kind: 'comment', accountId: String(entry.id), field: change.field, value: change.value },
-        });
-      }
+    await Promise.all(
+      body.entry.map(async (entry) => {
+        const accountId = String(entry.id);
+        if (!connectionCache.has(accountId)) {
+          connectionCache.set(
+            accountId,
+            prisma.channelConnection.findFirst({
+              where: { channel: 'INSTAGRAM', externalAccountId: accountId },
+              select: { id: true, tenantId: true },
+            }),
+          );
+        }
+        const connection = await connectionCache.get(accountId)!;
+        const tenantId = connection?.tenantId ?? null;
+        if (tenantId && !verifiedTenants.has(tenantId)) {
+          verifiedTenants.add(tenantId);
+          // First verified delivery proves the Meta dashboard config works.
+          await markInstagramWebhookVerified(tenantId).catch(() => undefined);
+        }
 
-      for (const messaging of entry.messaging ?? []) {
-        const msg = messaging as {
-          sender?: { id?: string };
-          message?: { mid?: string; is_echo?: boolean };
-          read?: unknown;
-          reaction?: unknown;
-        };
-        // Only inbound user messages; echoes/read receipts/reactions are ignored.
-        if (!msg.message?.mid || msg.message.is_echo) continue;
-        await recordAndEnqueueEvent({
-          channel: 'INSTAGRAM',
-          eventKey: `message:${msg.message.mid}`,
-          tenantId,
-          payload: { kind: 'dm', accountId: String(entry.id), messaging },
-        });
-      }
-    }
+        for (const change of entry.changes ?? []) {
+          if (change.field !== 'comments' && change.field !== 'live_comments') continue;
+          const commentId = String((change.value as { id?: unknown }).id ?? '');
+          if (!commentId) continue;
+          await recordAndEnqueueEvent({
+            channel: 'INSTAGRAM',
+            eventKey: `comment:${commentId}`,
+            tenantId,
+            payload: { kind: 'comment', accountId, field: change.field, value: change.value },
+          });
+        }
+
+        for (const messaging of entry.messaging ?? []) {
+          const msg = messaging as {
+            sender?: { id?: string };
+            message?: { mid?: string; is_echo?: boolean };
+            read?: unknown;
+            reaction?: unknown;
+          };
+          // Only inbound user messages; echoes/read receipts/reactions are ignored.
+          if (!msg.message?.mid || msg.message.is_echo) continue;
+          await recordAndEnqueueEvent({
+            channel: 'INSTAGRAM',
+            eventKey: `message:${msg.message.mid}`,
+            tenantId,
+            payload: { kind: 'dm', accountId, messaging },
+          });
+        }
+      }),
+    );
 
     return reply.code(200).send();
   });

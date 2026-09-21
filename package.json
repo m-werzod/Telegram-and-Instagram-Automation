@@ -4,7 +4,7 @@
   "private": true,
   "description": "Multi-agent Instagram + Telegram AI automation platform with unified CRM",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.9.0"
   },
   "packageManager": "pnpm@10.15.0",
   "pnpm": {

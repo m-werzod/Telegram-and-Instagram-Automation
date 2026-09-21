@@ -11,14 +11,23 @@ import { AuthError } from '../../lib/errors.js';
 
 export const SESSION_COOKIE = 'sid';
 
+// Verified against when the email is unknown, so both login paths cost one
+// full scrypt derivation — otherwise response timing enumerates valid emails.
+let timingEqualizerHash: string | null = null;
+
 export async function login(
   email: string,
   password: string,
 ): Promise<{ token: string; user: User; expiresAt: Date }> {
   const prisma = getPrisma();
   const user = await prisma.user.findUnique({ where: { email: email.toLowerCase().trim() } });
-  // Uniform error whether the user exists or not (no account enumeration).
-  if (!user || !(await verifyPassword(password, user.passwordHash))) {
+  // Uniform error AND uniform work whether the user exists or not.
+  if (!user) {
+    timingEqualizerHash ??= await hashPassword('timing-equalizer-dummy-password');
+    await verifyPassword(password, timingEqualizerHash);
+    throw new AuthError('Invalid email or password');
+  }
+  if (!(await verifyPassword(password, user.passwordHash))) {
     throw new AuthError('Invalid email or password');
   }
 

@@ -1,7 +1,7 @@
 import { Queue, Worker, UnrecoverableError } from 'bullmq';
 import { Redis } from 'ioredis';
 import { getLogger } from '../lib/logger.js';
-import { isRetryable, errorMessage } from '../lib/errors.js';
+import { isRetryable, errorMessage, RateLimitedError } from '../lib/errors.js';
 import {
   type EnqueueOptions,
   type JobHandler,
@@ -31,7 +31,9 @@ export class BullMqQueue implements JobQueue {
       connection: this.connection,
       defaultJobOptions: {
         attempts: RETRY_ATTEMPTS,
-        backoff: { type: 'exponential', delay: RETRY_BACKOFF_MS },
+        // Custom strategy (registered on the Worker): exponential backoff that
+        // also honors RateLimitedError.retryAfterMs from the platform APIs.
+        backoff: { type: 'custom' },
         removeOnComplete: { age: 24 * 3600, count: 5000 },
         removeOnFail: { age: 7 * 24 * 3600 },
       },
@@ -71,7 +73,17 @@ export class BullMqQueue implements JobQueue {
           throw err;
         }
       },
-      { connection: this.connection, concurrency: 8 },
+      {
+        connection: this.connection,
+        concurrency: 8,
+        settings: {
+          backoffStrategy: (attemptsMade: number, _type?: string, err?: Error) => {
+            const backoff = RETRY_BACKOFF_MS * 2 ** Math.max(attemptsMade - 1, 0);
+            const hint = err instanceof RateLimitedError ? (err.retryAfterMs ?? 0) : 0;
+            return Math.max(backoff, hint);
+          },
+        },
+      },
     );
     this.worker.on('failed', (job, err) => {
       getLogger().error(

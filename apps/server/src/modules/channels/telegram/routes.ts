@@ -34,9 +34,11 @@ export async function telegramWebhookRoutes(app: FastifyInstance): Promise<void>
         return reply.code(200).send({ ok: true }); // malformed — ack so Telegram stops retrying
       }
 
+      // Dedup key includes the bot id: update_id sequences are per bot, so a
+      // bot swap on the same connection must start a fresh dedup namespace.
       await recordAndEnqueueEvent({
         channel: 'TELEGRAM',
-        eventKey: `${connection.id}:${update.update_id}`,
+        eventKey: `${connection.id}:${connection.externalAccountId}:${update.update_id}`,
         tenantId: connection.tenantId,
         payload: { connectionId: connection.id, update },
       });

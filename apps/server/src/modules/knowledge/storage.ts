@@ -1,17 +1,18 @@
 import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { getEnv } from '../../config/env.js';
 
 /**
  * Local file storage for uploaded knowledge documents. Files are stored under
- * data/uploads/<tenantId>/<documentId> — outside the web root, never served
- * directly. Swap for S3-compatible storage by replacing this module.
+ * UPLOADS_DIR (default data/uploads)/<tenantId>/<documentId> — outside the web
+ * root, never served directly. Swap for S3-compatible storage by replacing
+ * this module.
  */
 
-const ROOT = process.env.UPLOADS_DIR ?? path.resolve(process.cwd(), 'data', 'uploads');
-
 function fileFor(tenantId: string, documentId: string): string {
+  const root = getEnv().UPLOADS_DIR ?? path.resolve(process.cwd(), 'data', 'uploads');
   // documentId is a cuid we generated; tenantId likewise. No user-controlled path parts.
-  return path.join(ROOT, tenantId, documentId);
+  return path.join(root, tenantId, documentId);
 }
 
 export async function storeFile(tenantId: string, documentId: string, data: Buffer): Promise<void> {
