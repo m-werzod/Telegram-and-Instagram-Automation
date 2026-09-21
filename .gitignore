@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Environment — never commit secrets
+.env
+.env.*
+!.env.example
+
+# Build output
+dist/
+build/
+apps/dashboard/dist/
+apps/server/dist/
+apps/server/public/dashboard/
+
+# Prisma
+apps/server/src/generated/
+
+# Logs
+*.log
+logs/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Test artifacts
+coverage/
+.vitest/
+
+# Uploaded knowledge files (local storage)
+data/uploads/

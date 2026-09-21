@@ -1,0 +1,30 @@
+{
+  "name": "omnichannel-ai-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Multi-agent Instagram + Telegram AI automation platform with unified CRM",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "packageManager": "pnpm@10.15.0",
+  "pnpm": {
+    "overrides": {
+      "deepmerge-ts": ">=8.0.0"
+    }
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @app/server --filter @app/dashboard dev",
+    "dev:server": "pnpm --filter @app/server dev",
+    "dev:dashboard": "pnpm --filter @app/dashboard dev",
+    "build": "pnpm --filter @app/server build && pnpm --filter @app/dashboard build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "test:integration": "pnpm --filter @app/server test:integration",
+    "db:generate": "pnpm --filter @app/server db:generate",
+    "db:migrate": "pnpm --filter @app/server db:migrate",
+    "db:migrate:deploy": "pnpm --filter @app/server db:migrate:deploy",
+    "db:seed": "pnpm --filter @app/server db:seed",
+    "start": "pnpm --filter @app/server start"
+  }
+}
