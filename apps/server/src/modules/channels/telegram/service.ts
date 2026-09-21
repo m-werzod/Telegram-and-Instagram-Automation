@@ -42,9 +42,19 @@ export async function connectTelegram(tenantId: string, botToken: string): Promi
   const me = await client.getMe();
   if (!me.is_bot) throw new ValidationError('Token does not belong to a bot');
 
-  // 2. Persist (encrypted at rest).
+  // 2. Persist (encrypted at rest). A reconnect must not wipe the stored
+  //    business-connection state of the personal account.
   const credentialsEncrypted = encryptSecret(JSON.stringify({ botToken: token }), env.ENCRYPTION_KEY);
   const webhookSecret = generateToken(32).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 128) || generateToken(24);
+
+  const existing = await prisma.channelConnection.findUnique({
+    where: { tenantId_channel: { tenantId, channel: 'TELEGRAM' } },
+  });
+  const metadata = {
+    ...((existing?.metadata as object) ?? {}),
+    botUsername: me.username ?? null,
+    botName: me.first_name,
+  };
 
   const connection = await prisma.channelConnection.upsert({
     where: { tenantId_channel: { tenantId, channel: 'TELEGRAM' } },
@@ -56,7 +66,7 @@ export async function connectTelegram(tenantId: string, botToken: string): Promi
       externalAccountId: String(me.id),
       credentialsEncrypted,
       webhookSecret,
-      metadata: { botUsername: me.username ?? null, botName: me.first_name },
+      metadata,
     },
     update: {
       status: 'connected',
@@ -64,7 +74,7 @@ export async function connectTelegram(tenantId: string, botToken: string): Promi
       externalAccountId: String(me.id),
       credentialsEncrypted,
       webhookSecret,
-      metadata: { botUsername: me.username ?? null, botName: me.first_name },
+      metadata,
     },
   });
 
@@ -77,6 +87,28 @@ export async function connectTelegram(tenantId: string, botToken: string): Promi
   } catch (err) {
     log.warn({ err: errorMessage(err) }, 'setMyCommands failed (non-fatal)');
   }
+
+  // 5. Personal-account automation (Telegram Business connection): the owner
+  //    performs the in-app connection themselves; the platform detects it
+  //    automatically and resolves this action.
+  const botHandle = me.username ? `@${me.username}` : 'your bot';
+  await upsertManualAction(tenantId, {
+    dedupKey: 'telegram-business-connect',
+    platform: 'Telegram',
+    title: 'Connect the bot to your PERSONAL Telegram account (Chat Automation)',
+    officialUrl: 'https://core.telegram.org/bots/features#business-bots',
+    steps: [
+      `Enable business mode on the bot: in Telegram open @BotFather → send /mybots → select ${botHandle} → Bot Settings → Business Mode (a.k.a. Secretary Mode) → Turn on.`,
+      'On the phone with YOUR PERSONAL account: open Telegram → Settings → "Chat Automation" (on accounts with Telegram Business/Premium the same screen is under Settings → Telegram Business → Chatbots).',
+      `Select ${botHandle} as the connected bot.`,
+      'Choose which chats the bot may access (e.g. exclude contacts, or only new chats) — the agent will only ever see the chats you include here.',
+      'Grant the "Reply to messages" permission (can_reply). Do NOT grant profile/gifts/Stars permissions — the platform does not use them.',
+      'Consent note (Telegram Bot Developer Terms §5.4): by connecting and enabling the Telegram Personal Account Agent you authorize this platform to process messages from the selected chats with its AI provider (Anthropic) solely to generate replies on your behalf. Message contents are stored in your own CRM database and are never used for AI training.',
+    ],
+    expectedResult:
+      'The platform detects the connection automatically (this task resolves itself) and the Connections page shows "Personal account: connected". Incoming messages in the selected chats then flow to the Telegram Personal Account Agent — it stays OFF until you enable it under Agents.',
+    whatToReturn: 'Nothing — the dashboard updates by itself. If it does not within a minute, check that Business Mode was enabled in @BotFather first.',
+  });
 
   return (await prisma.channelConnection.findUnique({ where: { id: connection.id } }))!;
 }
@@ -185,9 +217,12 @@ export async function checkTelegramHealth(connection: ChannelConnection): Promis
   }
   try {
     const info = await client.getWebhookInfo();
-    const expected = (connection.metadata as { webhookUrl?: string }).webhookUrl;
+    const meta = connection.metadata as {
+      webhookUrl?: string;
+      businessConnection?: { id: string; ownerUsername?: string | null; ownerName?: string };
+    };
     if (!info.url) return { status: 'WEBHOOK_ERROR', detail: 'No webhook is configured on this bot' };
-    if (expected && info.url !== expected) {
+    if (meta.webhookUrl && info.url !== meta.webhookUrl) {
       return { status: 'WEBHOOK_ERROR', detail: `Webhook points elsewhere: ${info.url}` };
     }
     if (info.last_error_date && Date.now() / 1000 - info.last_error_date < 3600) {
@@ -196,7 +231,33 @@ export async function checkTelegramHealth(connection: ChannelConnection): Promis
         detail: `Recent delivery error: ${info.last_error_message ?? 'unknown'} (pending: ${info.pending_update_count})`,
       };
     }
-    return { status: 'CONNECTED', detail: `pending updates: ${info.pending_update_count}` };
+
+    // Personal account (Telegram Business connection): live-verify and refresh.
+    let personalDetail = 'personal account: not connected';
+    if (meta.businessConnection?.id) {
+      try {
+        const bc = await client.getBusinessConnection(meta.businessConnection.id);
+        const { toStoredBusinessConnection } = await import('./handler.js');
+        const stored = toStoredBusinessConnection(bc);
+        await getPrisma().channelConnection.update({
+          where: { id: connection.id },
+          data: {
+            metadata: { ...(connection.metadata as object), businessConnection: stored as never },
+          },
+        });
+        const owner = stored.ownerUsername ? `@${stored.ownerUsername}` : stored.ownerName;
+        personalDetail = stored.isEnabled
+          ? `personal account: connected as ${owner} (${stored.canReply ? 'can reply' : 'READ-ONLY — grant "reply to messages"'})`
+          : `personal account: connection disabled by ${owner}`;
+      } catch (err) {
+        personalDetail = `personal account: connection check failed (${errorMessage(err)})`;
+      }
+    }
+
+    return {
+      status: 'CONNECTED',
+      detail: `pending updates: ${info.pending_update_count}; ${personalDetail}`,
+    };
   } catch (err) {
     return { status: 'DEGRADED', detail: `getWebhookInfo failed: ${errorMessage(err)}` };
   }

@@ -78,6 +78,8 @@ enum AgentType {
   INSTAGRAM_COMMENT
   INSTAGRAM_DM
   TELEGRAM
+  /** Automates the owner's PERSONAL Telegram account chats (not the bot's). */
+  TELEGRAM_PERSONAL
 }
 
 model Agent {
@@ -309,6 +311,8 @@ enum ConversationKind {
   INSTAGRAM_COMMENT_THREAD
   INSTAGRAM_DM
   TELEGRAM_CHAT
+  /** A private chat of the owner's personal Telegram account. */
+  TELEGRAM_PERSONAL_CHAT
 }
 
 model Conversation {

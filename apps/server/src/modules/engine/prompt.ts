@@ -24,7 +24,10 @@ export interface ChannelRules {
   extra: string[];
 }
 
-export const CHANNEL_RULES: Record<'instagram_comment' | 'instagram_dm' | 'telegram', ChannelRules> = {
+export const CHANNEL_RULES: Record<
+  'instagram_comment' | 'instagram_dm' | 'telegram' | 'telegram_personal',
+  ChannelRules
+> = {
   instagram_comment: {
     label: 'Instagram comment thread (public)',
     maxReplyChars: 950,
@@ -49,6 +52,15 @@ export const CHANNEL_RULES: Record<'instagram_comment' | 'instagram_dm' | 'teleg
     extra: [
       'Write plain text (no markdown formatting characters).',
       'If the user sends /start, greet them according to your instructions and explain briefly how you can help.',
+    ],
+  },
+  telegram_personal: {
+    label: "the owner's personal Telegram account (you reply on the owner's behalf)",
+    maxReplyChars: 3900,
+    extra: [
+      'Write plain text (no markdown formatting characters).',
+      'These are private chats with the OWNER’S PERSONAL account. Be conservative: reply only when the message is clearly business-related; otherwise set reply to null and escalate so the owner answers personally.',
+      'Never claim to be the owner in person; you are their assistant. Never share the owner’s personal details, location, or plans.',
     ],
   },
 };

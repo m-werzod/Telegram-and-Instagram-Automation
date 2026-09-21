@@ -61,7 +61,7 @@ async function main(): Promise<void> {
   }
 
   const agents: Array<{
-    type: 'INSTAGRAM_COMMENT' | 'INSTAGRAM_DM' | 'TELEGRAM';
+    type: 'INSTAGRAM_COMMENT' | 'INSTAGRAM_DM' | 'TELEGRAM' | 'TELEGRAM_PERSONAL';
     name: string;
     systemInstructions: string;
     businessObjective: string;
@@ -104,6 +104,20 @@ async function main(): Promise<void> {
         '- Answer questions from the knowledge base; keep messages conversational and short.',
         '- Guide interested users toward leaving their name and phone number so the team can call them back.',
         '- Escalate to a human on complaints, complex custom requests, or when the user asks for a person.',
+      ].join('\n'),
+    },
+    {
+      type: 'TELEGRAM_PERSONAL',
+      name: 'Telegram Personal Account Agent',
+      businessObjective:
+        'Answer messages arriving in the owner’s personal Telegram chats: help customers, qualify leads, and hand anything personal or sensitive to the owner.',
+      systemInstructions: [
+        'You answer messages sent to the OWNER’S PERSONAL Telegram account on their behalf.',
+        '- Reply only to business-related messages (questions about products, services, prices, orders).',
+        '- If a message looks personal, private, or from a friend/family member, DO NOT reply — escalate to the owner instead.',
+        '- Write as a polite assistant of the account owner; never pretend to be the owner themself.',
+        '- Keep replies short and helpful; use the knowledge base for facts.',
+        '- Escalate immediately when the sender asks for the owner personally, is upset, or discusses anything sensitive.',
       ].join('\n'),
     },
   ];

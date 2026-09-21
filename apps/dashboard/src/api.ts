@@ -49,7 +49,7 @@ export interface SessionUser {
 
 export interface Agent {
   id: string;
-  type: 'INSTAGRAM_COMMENT' | 'INSTAGRAM_DM' | 'TELEGRAM';
+  type: 'INSTAGRAM_COMMENT' | 'INSTAGRAM_DM' | 'TELEGRAM' | 'TELEGRAM_PERSONAL';
   name: string;
   enabled: boolean;
   systemInstructions: string;

@@ -84,6 +84,26 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
         typeof req.body?.enabled === 'boolean' ? req.body.enabled : !existing.enabled;
       const agent = await prisma.agent.update({ where: { id: existing.id }, data: { enabled } });
       await audit(req, enabled ? 'agent.enable' : 'agent.disable', agent.id);
+      // Telegram Bot Developer Terms §5.4: processing personal-chat contents
+      // with a third-party AI API requires the account owner's authorization —
+      // record that authorization explicitly when the owner enables the agent.
+      if (enabled && existing.type === 'TELEGRAM_PERSONAL') {
+        await prisma.auditLog
+          .create({
+            data: {
+              tenantId,
+              userId: req.user?.id ?? null,
+              action: 'telegram_personal.ai_processing_consent',
+              resource: 'agent',
+              resourceId: agent.id,
+              detail: {
+                statement:
+                  'Operator enabled the Telegram Personal Account Agent, authorizing AI processing (Anthropic) of messages from the chats shared via their Telegram Business connection, solely to generate replies on their behalf. No AI training on message data.',
+              },
+            },
+          })
+          .catch(() => undefined);
+      }
       return { agent };
     },
   );

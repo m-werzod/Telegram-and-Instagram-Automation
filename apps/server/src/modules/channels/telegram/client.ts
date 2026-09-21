@@ -29,6 +29,27 @@ export interface TgMessage {
   chat: { id: number; type: 'private' | 'group' | 'supergroup' | 'channel'; username?: string; title?: string };
   date: number;
   text?: string;
+  /** Present on messages in chats of a connected personal account (Telegram Business). */
+  business_connection_id?: string;
+}
+
+/** Owner-granted permissions of a connected business bot (subset we use). */
+export interface TgBusinessBotRights {
+  can_reply?: boolean;
+  can_read_messages?: boolean;
+}
+
+/**
+ * A Telegram Business connection: the owner's PERSONAL account delegated its
+ * private chats to this bot (Settings → Chat Automation / Telegram Business).
+ */
+export interface TgBusinessConnection {
+  id: string;
+  user: TgUser;
+  user_chat_id: number;
+  date: number;
+  rights?: TgBusinessBotRights;
+  is_enabled: boolean;
 }
 
 export interface TgUpdate {
@@ -36,6 +57,12 @@ export interface TgUpdate {
   message?: TgMessage;
   edited_message?: TgMessage;
   callback_query?: { id: string; from: TgUser; data?: string; message?: TgMessage };
+  /** Personal account connected/disconnected/edited the business connection. */
+  business_connection?: TgBusinessConnection;
+  /** New message in a private chat of the connected personal account. */
+  business_message?: TgMessage;
+  edited_business_message?: TgMessage;
+  deleted_business_messages?: { business_connection_id: string; chat: { id: number }; message_ids: number[] };
 }
 
 /** Telegram sendMessage hard limit: 4096 characters after entity parsing. */
@@ -110,9 +137,27 @@ export class TelegramClient {
     return this.call<boolean>('setWebhook', {
       url: params.url,
       secret_token: params.secretToken,
-      allowed_updates: params.allowedUpdates ?? ['message', 'edited_message', 'callback_query'],
+      // An explicit allowed_updates list FILTERS OUT everything unnamed — the
+      // Telegram Business update types must be listed or personal-account
+      // messages silently never arrive.
+      allowed_updates: params.allowedUpdates ?? [
+        'message',
+        'edited_message',
+        'callback_query',
+        'business_connection',
+        'business_message',
+        'edited_business_message',
+        'deleted_business_messages',
+      ],
       drop_pending_updates: params.dropPendingUpdates ?? false,
       ...(params.maxConnections ? { max_connections: params.maxConnections } : {}),
+    });
+  }
+
+  /** Re-fetch a business connection's current state/rights (health checks). */
+  getBusinessConnection(businessConnectionId: string): Promise<TgBusinessConnection> {
+    return this.call<TgBusinessConnection>('getBusinessConnection', {
+      business_connection_id: businessConnectionId,
     });
   }
 
@@ -124,18 +169,42 @@ export class TelegramClient {
     return this.call<TgWebhookInfo>('getWebhookInfo');
   }
 
-  /** Sends plain text, splitting on the 4096-char limit at line/space boundaries. */
-  async sendMessage(chatId: number | string, text: string): Promise<TgMessage[]> {
+  /**
+   * Sends plain text, splitting on the 4096-char limit at line/space
+   * boundaries. With businessConnectionId set, the message is sent ON BEHALF
+   * OF the connected personal account (appears as the account, not the bot).
+   */
+  async sendMessage(
+    chatId: number | string,
+    text: string,
+    opts: { businessConnectionId?: string } = {},
+  ): Promise<TgMessage[]> {
     const parts = splitMessage(text, TELEGRAM_MAX_MESSAGE);
     const sent: TgMessage[] = [];
     for (const part of parts) {
-      sent.push(await this.call<TgMessage>('sendMessage', { chat_id: chatId, text: part }));
+      sent.push(
+        await this.call<TgMessage>('sendMessage', {
+          chat_id: chatId,
+          text: part,
+          ...(opts.businessConnectionId
+            ? { business_connection_id: opts.businessConnectionId }
+            : {}),
+        }),
+      );
     }
     return sent;
   }
 
-  sendChatAction(chatId: number | string, action = 'typing'): Promise<boolean> {
-    return this.call<boolean>('sendChatAction', { chat_id: chatId, action });
+  sendChatAction(
+    chatId: number | string,
+    action = 'typing',
+    opts: { businessConnectionId?: string } = {},
+  ): Promise<boolean> {
+    return this.call<boolean>('sendChatAction', {
+      chat_id: chatId,
+      action,
+      ...(opts.businessConnectionId ? { business_connection_id: opts.businessConnectionId } : {}),
+    });
   }
 
   setMyCommands(commands: Array<{ command: string; description: string }>): Promise<boolean> {

@@ -8,6 +8,11 @@ A production-grade, multi-agent AI automation platform with a unified CRM:
 - **Instagram DM Agent** — full conversational agent for Instagram direct messages
   (24-hour messaging window, echo-safe, idempotent).
 - **Telegram Agent** — webhook-driven Telegram bot with `secret_token` verification.
+- **Telegram Personal Account Agent** — answers messages arriving in the owner's
+  **personal** Telegram chats via a Telegram Business connection (Telegram's
+  official "Chat Automation" mechanism; owner-scoped, owner-revocable, replies
+  appear from the personal account). No MTProto userbot — see
+  [docs/telegram-personal-account.md](docs/telegram-personal-account.md).
 - **Unified CRM** — leads with identity resolution across channels, qualification data,
   notes, tags, statuses, manual merging.
 - **Knowledge bases** — PDF/DOCX/TXT/MD/URL/text ingestion → chunking → embeddings

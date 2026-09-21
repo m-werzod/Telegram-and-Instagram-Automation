@@ -5,7 +5,8 @@ import { api, type Agent } from '../api';
 const CHANNEL_LABEL: Record<Agent['type'], string> = {
   INSTAGRAM_COMMENT: 'Instagram · Comments',
   INSTAGRAM_DM: 'Instagram · Direct messages',
-  TELEGRAM: 'Telegram',
+  TELEGRAM: 'Telegram · Bot',
+  TELEGRAM_PERSONAL: 'Telegram · Personal account',
 };
 
 export function AgentToggle({ agent }: { agent: Agent }) {

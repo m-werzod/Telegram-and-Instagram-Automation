@@ -114,6 +114,34 @@ Source: https://core.telegram.org/bots/api
 - Privacy mode is ON by default in groups (bot only sees commands/replies) — toggled
   via @BotFather `/setprivacy`, cannot be changed via API.
 
+### Telegram Business connected bots (PERSONAL account automation)
+
+Source: https://core.telegram.org/api/bots/connected-business-bots,
+https://core.telegram.org/bots/features#business-bots — full compliance
+write-up in docs/telegram-personal-account.md.
+
+- The account owner connects ONE bot in Settings → Chat Automation (or
+  Settings → Telegram Business → Chatbots). **No Premium required** since
+  Bot API 10.0 (May 2026). The bot must have Business/Secretary Mode enabled
+  in @BotFather.
+- Owner scopes chats (include/exclude contacts, new chats, specific users) and
+  grants `BusinessBotRights` — the platform uses only `can_reply` (valid only
+  in chats with incoming messages in the **last 24 hours**) and
+  `can_read_messages`.
+- Updates on the normal webhook: `business_connection`
+  (`{id, user, user_chat_id, date, rights, is_enabled}`), `business_message`,
+  `edited_business_message`, `deleted_business_messages` — an explicit
+  `allowed_updates` list MUST name them. `getBusinessConnection(id)` re-checks.
+- Reply with `business_connection_id` on `sendMessage`/`sendChatAction`/etc.;
+  the message appears as the personal account (`sender_business_bot` set).
+- Constraints: no initiating new conversations, no pre-connection history,
+  1:1 private chats only, general bot rate limits.
+- Policy: Bot Developer Terms §5.4 — business-chat contents only for the
+  chatbot service; disclosure to third-party APIs (the AI provider) requires
+  the owner's authorization (recorded on agent enable); no AI training on
+  message data (also API ToS 1.5). Raw MTProto userbot automation is
+  deliberately NOT used — see docs/telegram-personal-account.md.
+
 ## Embeddings & retrieval
 
 - Anthropic offers **no first-party embeddings API**; official docs recommend Voyage AI.
