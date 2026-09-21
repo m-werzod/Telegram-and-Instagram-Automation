@@ -74,7 +74,8 @@ pnpm db:seed          # creates tenant + admin user (ADMIN_EMAIL / ADMIN_PASSWOR
 pnpm dev              # server on :3000, dashboard dev server on :5173
 ```
 
-Open http://localhost:5173, sign in with `ADMIN_EMAIL` / `ADMIN_PASSWORD`, then:
+Open http://localhost:5173 and sign in — Login `Instagram`, Password `Telegram3737`
+(the seed defaults; override with `ADMIN_LOGIN` / `ADMIN_PASSWORD`). Then:
 
 1. **Connections → Telegram**: paste a bot token from @BotFather. The platform validates
    it, encrypts it, configures the webhook (requires `APP_URL` to be a public HTTPS URL —
@@ -110,6 +111,11 @@ TEST_DATABASE_URL=postgresql://platform:platform@localhost:5432/platform_test pn
 ```
 
 ## Production deployment
+
+See **[docs/deployment.md](docs/deployment.md)** for the full guide (Railway /
+VPS single-container recommended; optional Vercel-hosted dashboard). The app
+container is stateless — all state lives in Postgres (pgvector) and Redis, and
+`REDIS_URL` is required in production. Quick VPS path:
 
 ```bash
 cp .env.example .env   # fill everything in; APP_URL must be your public HTTPS URL

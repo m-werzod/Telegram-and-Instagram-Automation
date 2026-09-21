@@ -44,10 +44,9 @@ services:
       - .env
     ports:
       - "3000:3000"
-    volumes:
-      - uploads:/app/apps/server/data/uploads
+    # No app volume: all state (including uploaded knowledge files) lives in
+    # Postgres/Redis — the app container is stateless.
 
 volumes:
   db-data:
   redis-data:
-  uploads:

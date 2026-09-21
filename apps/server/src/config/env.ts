@@ -23,8 +23,15 @@ const envSchema = z.object({
     .string()
     .optional()
     .transform((v) => v === 'true' || v === '1'),
-  /** Directory for uploaded knowledge documents (default: <cwd>/data/uploads). */
-  UPLOADS_DIR: z.string().optional(),
+  /**
+   * Production requires Redis (durable queue state; the in-process queue keeps
+   * retry state in memory). Set to true only to knowingly run a single-node
+   * production instance without Redis.
+   */
+  ALLOW_INLINE_QUEUE: z
+    .string()
+    .optional()
+    .transform((v) => v === 'true' || v === '1'),
 
   DATABASE_URL: z.string().min(1),
   /** Optional. When absent, jobs run on the in-process inline queue (no Redis required). */
@@ -58,9 +65,9 @@ const envSchema = z.object({
   /** Optional: seed the Telegram connection from env instead of the dashboard. */
   TELEGRAM_BOT_TOKEN: z.string().optional(),
 
-  // Initial admin (used by prisma seed only)
-  ADMIN_EMAIL: z.string().email().default('admin@example.com'),
-  ADMIN_PASSWORD: z.string().min(8).default('change-me-now'),
+  // Initial admin credentials (used by prisma seed only)
+  ADMIN_LOGIN: z.string().min(1).default('Instagram'),
+  ADMIN_PASSWORD: z.string().min(8).default('Telegram3737'),
   TENANT_NAME: z.string().default('Default Business'),
 });
 

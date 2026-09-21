@@ -28,9 +28,11 @@ const MANAGED_KEYS = [
   'META_VERIFY_TOKEN',
   'INSTAGRAM_ACCESS_TOKEN',
   'TELEGRAM_BOT_TOKEN',
-  'ADMIN_EMAIL',
+  'ADMIN_LOGIN',
   'ADMIN_PASSWORD',
   'TENANT_NAME',
+  'TRUST_PROXY',
+  'ALLOW_INLINE_QUEUE',
 ] as const;
 
 const VALID_KEY = 'ab'.repeat(32); // 64 lowercase hex chars
@@ -77,7 +79,7 @@ describe('loadEnv', () => {
     expect(env.ENCRYPTION_KEY).toBe(VALID_KEY);
     expect(env.APP_URL).toBeUndefined();
     expect(env.REDIS_URL).toBeUndefined();
-    expect(env.ADMIN_EMAIL).toBe('admin@example.com');
+    expect(env.ADMIN_LOGIN).toBe('Instagram');
     expect(env.TENANT_NAME).toBe('Default Business');
   });
 
@@ -191,9 +193,7 @@ describe('loadEnv', () => {
     );
   });
 
-  it('rejects an invalid ADMIN_EMAIL', () => {
-    expect(() => loadEnv(baseOverrides({ ADMIN_EMAIL: 'not-an-email' }))).toThrow(
-      /ADMIN_EMAIL/,
-    );
+  it('rejects a too-short ADMIN_PASSWORD', () => {
+    expect(() => loadEnv(baseOverrides({ ADMIN_PASSWORD: 'short' }))).toThrow(/ADMIN_PASSWORD/);
   });
 });

@@ -67,10 +67,21 @@ export async function buildApp(env: Env): Promise<FastifyInstance> {
     origin: env.NODE_ENV === 'production' ? false : ['http://localhost:5173'],
     credentials: true,
   });
+  // Rate-limit state lives in Redis when available (durable, multi-instance
+  // safe); the in-memory store remains for development without Redis.
+  let rateLimitRedis: import('ioredis').Redis | undefined;
+  if (env.REDIS_URL) {
+    const { Redis } = await import('ioredis');
+    rateLimitRedis = new Redis(env.REDIS_URL, { connectTimeout: 1000, maxRetriesPerRequest: 1 });
+    app.addHook('onClose', async () => {
+      rateLimitRedis?.disconnect();
+    });
+  }
   await app.register(fastifyRateLimit, {
     global: true,
     max: 300,
     timeWindow: '1 minute',
+    ...(rateLimitRedis ? { redis: rateLimitRedis } : {}),
   });
   await app.register(fastifyMultipart);
 

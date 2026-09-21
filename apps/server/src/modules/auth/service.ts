@@ -11,24 +11,24 @@ import { AuthError } from '../../lib/errors.js';
 
 export const SESSION_COOKIE = 'sid';
 
-// Verified against when the email is unknown, so both login paths cost one
-// full scrypt derivation — otherwise response timing enumerates valid emails.
+// Verified against when the login is unknown, so both paths cost one full
+// scrypt derivation — otherwise response timing enumerates valid logins.
 let timingEqualizerHash: string | null = null;
 
 export async function login(
-  email: string,
+  username: string,
   password: string,
 ): Promise<{ token: string; user: User; expiresAt: Date }> {
   const prisma = getPrisma();
-  const user = await prisma.user.findUnique({ where: { email: email.toLowerCase().trim() } });
+  const user = await prisma.user.findUnique({ where: { username: username.trim() } });
   // Uniform error AND uniform work whether the user exists or not.
   if (!user) {
     timingEqualizerHash ??= await hashPassword('timing-equalizer-dummy-password');
     await verifyPassword(password, timingEqualizerHash);
-    throw new AuthError('Invalid email or password');
+    throw new AuthError('Invalid login or password');
   }
   if (!(await verifyPassword(password, user.passwordHash))) {
-    throw new AuthError('Invalid email or password');
+    throw new AuthError('Invalid login or password');
   }
 
   const token = generateToken(32);
@@ -61,7 +61,8 @@ export async function getSessionUser(token: string): Promise<User | null> {
 
 export async function createUser(params: {
   tenantId: string;
-  email: string;
+  username: string;
+  email?: string;
   password: string;
   name: string;
   role: 'ADMIN' | 'OPERATOR';
@@ -70,7 +71,8 @@ export async function createUser(params: {
   return prisma.user.create({
     data: {
       tenantId: params.tenantId,
-      email: params.email.toLowerCase().trim(),
+      username: params.username.trim(),
+      email: params.email?.toLowerCase().trim() ?? null,
       passwordHash: await hashPassword(params.password),
       name: params.name,
       role: params.role,

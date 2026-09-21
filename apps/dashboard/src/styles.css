@@ -111,6 +111,82 @@ label.field .hint { color: var(--muted); font-size: 12px; margin-top: 3px; displ
 .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; }
 .login-box { width: 360px; }
 
+/* ── Sign-in page ─────────────────────────────────────────────────────── */
+.login-page {
+  min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(1200px 700px at 15% -10%, #1e2f55 0%, transparent 55%),
+              radial-gradient(1000px 700px at 110% 110%, #14243f 0%, transparent 55%),
+              linear-gradient(160deg, #0b1220 0%, #101b30 55%, #0b1220 100%);
+  padding: 24px; position: relative; overflow: hidden;
+}
+.login-glow {
+  position: absolute; border-radius: 50%; filter: blur(90px); opacity: 0.35; pointer-events: none;
+}
+.login-glow-a { width: 420px; height: 420px; background: #2f6fed; top: -140px; right: -100px; }
+.login-glow-b { width: 380px; height: 380px; background: #7c3aed; bottom: -160px; left: -120px; }
+
+.login-card {
+  width: 400px; max-width: 100%; background: rgba(255, 255, 255, 0.97);
+  border-radius: 18px; padding: 36px 34px 26px;
+  box-shadow: 0 24px 70px rgba(4, 10, 30, 0.55), 0 2px 8px rgba(4, 10, 30, 0.3);
+  position: relative; z-index: 1;
+}
+.login-brand { text-align: center; margin-bottom: 26px; }
+.login-logo {
+  width: 56px; height: 56px; margin: 0 auto 14px; border-radius: 16px;
+  display: flex; align-items: center; justify-content: center; color: #fff;
+  background: linear-gradient(135deg, #2f6fed 0%, #7c3aed 100%);
+  box-shadow: 0 8px 22px rgba(47, 111, 237, 0.45);
+}
+.login-brand h1 { margin: 0 0 6px; font-size: 20px; font-weight: 700; color: #101b30; letter-spacing: -0.2px; }
+.login-brand p { margin: 0; color: var(--muted); font-size: 13px; }
+
+.login-field { display: block; margin-bottom: 16px; }
+.login-field > span {
+  display: block; font-size: 12px; font-weight: 700; letter-spacing: 0.6px;
+  text-transform: uppercase; color: #55627a; margin-bottom: 7px;
+}
+.login-input {
+  display: flex; align-items: center; gap: 10px;
+  border: 1.5px solid var(--border); border-radius: 11px; padding: 0 12px;
+  background: #fafbfd; color: #8792a5; transition: border-color 0.15s, box-shadow 0.15s;
+}
+.login-input:focus-within {
+  border-color: var(--accent); background: #fff; color: var(--accent);
+  box-shadow: 0 0 0 4px rgba(47, 111, 237, 0.13);
+}
+.login-input input {
+  border: none; background: transparent; padding: 13px 0; font-size: 14.5px;
+  color: var(--text); flex: 1; min-width: 0;
+}
+.login-input input:focus { outline: none; }
+.login-eye {
+  border: none; background: none; padding: 6px; display: flex; color: #8792a5; cursor: pointer;
+}
+.login-eye:hover { color: var(--accent); border: none; }
+
+.login-error {
+  background: var(--bad-soft); color: var(--bad); border: 1px solid #f2cfcf;
+  border-radius: 10px; padding: 10px 12px; font-size: 13px; margin-bottom: 14px;
+}
+.login-submit {
+  width: 100%; padding: 13px; border: none; border-radius: 11px; cursor: pointer;
+  font-size: 15px; font-weight: 700; color: #fff; letter-spacing: 0.2px;
+  background: linear-gradient(135deg, #2f6fed 0%, #6d3aed 100%);
+  box-shadow: 0 10px 24px rgba(47, 111, 237, 0.35);
+  transition: transform 0.12s, box-shadow 0.12s, filter 0.12s;
+}
+.login-submit:hover:not(:disabled) { filter: brightness(1.06); transform: translateY(-1px); }
+.login-submit:disabled { opacity: 0.6; cursor: not-allowed; box-shadow: none; }
+.login-footnote { text-align: center; color: #97a1b3; font-size: 12px; margin: 18px 0 0; }
+
+@keyframes login-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-7px); } 40% { transform: translateX(7px); }
+  60% { transform: translateX(-4px); } 80% { transform: translateX(4px); }
+}
+.login-card.shake { animation: login-shake 0.35s ease; }
+
 .chat { display: flex; flex-direction: column; gap: 8px; max-height: 480px; overflow-y: auto; padding: 4px; }
 .msg { max-width: 75%; padding: 8px 12px; border-radius: 12px; white-space: pre-wrap; }
 .msg.in { background: #eef1f4; align-self: flex-start; }

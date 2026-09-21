@@ -21,8 +21,8 @@ async function hashPassword(password: string): Promise<string> {
  */
 async function main(): Promise<void> {
   const tenantName = process.env.TENANT_NAME ?? 'Default Business';
-  const adminEmail = (process.env.ADMIN_EMAIL ?? 'admin@example.com').toLowerCase();
-  const adminPassword = process.env.ADMIN_PASSWORD ?? 'change-me-now';
+  const adminLogin = (process.env.ADMIN_LOGIN ?? 'Instagram').trim();
+  const adminPassword = process.env.ADMIN_PASSWORD ?? 'Telegram3737';
 
   const slug = tenantName
     .toLowerCase()
@@ -35,18 +35,18 @@ async function main(): Promise<void> {
     update: {},
   });
 
-  const existingAdmin = await prisma.user.findUnique({ where: { email: adminEmail } });
+  const existingAdmin = await prisma.user.findUnique({ where: { username: adminLogin } });
   if (!existingAdmin) {
     await prisma.user.create({
       data: {
         tenantId: tenant.id,
-        email: adminEmail,
+        username: adminLogin,
         passwordHash: await hashPassword(adminPassword),
         name: 'Administrator',
         role: 'ADMIN',
       },
     });
-    console.error(`Created admin user ${adminEmail}`);
+    console.error(`Created admin user "${adminLogin}"`);
   }
 
   let kb = await prisma.knowledgeBase.findFirst({ where: { tenantId: tenant.id } });

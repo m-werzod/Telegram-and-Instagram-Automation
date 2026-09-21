@@ -51,7 +51,7 @@ export default function App() {
         <NavLink to="/manual-actions">Manual actions</NavLink>
         <div className="spacer" />
         <div className="user">
-          {user.name} · {user.role}
+          {user.username} · {user.role}
           <br />
           <button className="small" onClick={logout}>Sign out</button>
         </div>

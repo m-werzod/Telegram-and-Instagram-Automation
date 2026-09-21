@@ -42,7 +42,7 @@ export const api = {
 
 export interface SessionUser {
   id: string;
-  email: string;
+  username: string;
   name: string;
   role: 'ADMIN' | 'OPERATOR';
 }
