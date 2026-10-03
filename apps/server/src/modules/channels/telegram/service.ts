@@ -22,6 +22,29 @@ export function telegramWebhookPath(connectionId: string): string {
   return `/api/webhooks/telegram/${connectionId}`;
 }
 
+/**
+ * Self-probe: does APP_URL actually route back to THIS server from the
+ * public internet? A syntactically valid https:// URL is not proof of
+ * reachability — NAT, a shared-IP provider gateway (e.g. Traefik routing by
+ * registered hostname), or a firewall can all accept the TCP connection and
+ * return a plausible-looking response (even a 404) from something that is
+ * NOT this application. Hitting our own /api/health and checking its exact,
+ * distinctive JSON shape is a cheap, reliable way to tell "reached us" apart
+ * from "reached someone else at that IP" — a generic 404 cannot fake it.
+ */
+async function isPubliclyReachable(appUrl: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${appUrl.replace(/\/$/, '')}/api/health`, {
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!res.ok) return false;
+    const body = (await res.json().catch(() => null)) as { status?: string; db?: string } | null;
+    return typeof body?.status === 'string' && typeof body?.db === 'string';
+  } catch {
+    return false;
+  }
+}
+
 export function getTelegramClient(connection: ChannelConnection): TelegramClient {
   const env = getEnv();
   const creds = JSON.parse(decryptSecret(connection.credentialsEncrypted, env.ENCRYPTION_KEY)) as TelegramCredentials;
@@ -126,7 +149,14 @@ export async function configureTelegramWebhook(connectionId: string): Promise<vo
   const log = childLogger({ module: 'telegram', tenantId: connection.tenantId, connectionId });
 
   const appUrl = env.APP_URL;
-  const usableUrl = appUrl && appUrl.startsWith('https://');
+  const syntacticallyUsable = appUrl && appUrl.startsWith('https://');
+  const usableUrl = syntacticallyUsable && (await isPubliclyReachable(appUrl));
+  if (syntacticallyUsable && !usableUrl) {
+    log.warn(
+      { appUrl },
+      'APP_URL is syntactically valid but not actually reachable from the public internet (self-probe failed) — falling back to polling',
+    );
+  }
 
   if (!usableUrl) {
     // No reachable public HTTPS URL — fall back to long-polling (Bot API
@@ -141,9 +171,11 @@ export async function configureTelegramWebhook(connectionId: string): Promise<vo
       steps: [
         'Not required — the bot is already working via long-polling (no public URL needed).',
         'Webhook push gives slightly lower latency and less server load at high volume. To switch to it: deploy with a public HTTPS URL (valid TLS certificate; Telegram supports ports 443, 80, 88, 8443) or a tunnel (e.g. `cloudflared tunnel --url http://localhost:3000`).',
-        'Set APP_URL in the .env file to that HTTPS base URL (e.g. APP_URL=https://your-domain.com), restart the server, then press "Reconfigure webhook" on the Connections page.',
+        syntacticallyUsable
+          ? `APP_URL (${appUrl}) is set but did not answer a self-check — the request never reached this server. On a shared-IP VPS this usually means ports 80/443 are not yet routed to this machine at the hosting provider's network level (a provider panel setting, not something this app controls). Fix the routing, then press "Reconfigure webhook" here.`
+          : 'Set APP_URL in the .env file to a public HTTPS base URL (e.g. APP_URL=https://your-domain.com), restart the server, then press "Reconfigure webhook" on the Connections page.',
       ],
-      expectedResult: 'The Telegram connection health shows "webhook" mode with no last_error_message.',
+      expectedResult: 'The Telegram connection health shows "mode: webhook" with no last_error_message.',
       whatToReturn: 'Nothing — this is optional. Polling already works.',
     });
     await startPolling(connection);
@@ -151,12 +183,14 @@ export async function configureTelegramWebhook(connectionId: string): Promise<vo
       where: { id: connection.id },
       data: {
         healthStatus: 'CONNECTED',
-        healthDetail: 'Using long-polling (no public HTTPS URL configured) — fully functional.',
+        healthDetail: syntacticallyUsable
+          ? `Using long-polling — ${appUrl} did not answer a public reachability self-check, so webhook push is unavailable for now. Fully functional either way.`
+          : 'Using long-polling (no public HTTPS URL configured) — fully functional.',
         lastHealthCheckAt: new Date(),
         metadata: { ...(connection.metadata as object), channelMode: 'polling' },
       },
     });
-    log.info('APP_URL not public HTTPS — started long-polling fallback');
+    log.info({ syntacticallyUsable }, 'public URL unusable — started long-polling fallback');
     return;
   }
 
