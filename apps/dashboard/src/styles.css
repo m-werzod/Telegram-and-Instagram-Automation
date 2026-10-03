@@ -90,6 +90,7 @@ svg { display: block; flex-shrink: 0; }
 .topbar { display: none; }
 .bottombar { display: none; }
 .drawer-backdrop { display: none; }
+.nav-drawer { display: none; }
 
 .main { flex: 1; min-width: 0; padding: 26px 30px 48px; max-width: 1240px; }
 
