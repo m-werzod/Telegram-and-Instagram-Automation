@@ -284,7 +284,11 @@ async function main(): Promise<void> {
         tone: 'samimiy, professional',
         language: 'uz',
         provider: 'anthropic',
-        model: 'claude-opus-5',
+        // Sonnet 5 is the cost-effective default for short, conversational
+        // customer-service replies (2.5x cheaper than Opus 5, same quality
+        // for this workload); switch an individual agent to Opus 5 in its
+        // settings if you want maximum reasoning depth for it specifically.
+        model: 'claude-sonnet-5',
         knowledgeBaseId: kb.id,
       },
       update: {},

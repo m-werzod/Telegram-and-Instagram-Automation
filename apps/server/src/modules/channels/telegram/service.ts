@@ -6,6 +6,7 @@ import { ValidationError, errorMessage } from '../../../lib/errors.js';
 import { childLogger } from '../../../lib/logger.js';
 import { upsertManualAction, resolveManualAction } from '../../manual-actions/service.js';
 import { TelegramClient } from './client.js';
+import { isPolling, startPolling, stopPolling } from './polling.js';
 
 /**
  * Telegram connection lifecycle (spec §14–15): validate token → store encrypted
@@ -128,32 +129,40 @@ export async function configureTelegramWebhook(connectionId: string): Promise<vo
   const usableUrl = appUrl && appUrl.startsWith('https://');
 
   if (!usableUrl) {
+    // No reachable public HTTPS URL — fall back to long-polling (Bot API
+    // getUpdates), a fully supported Telegram transport that needs no
+    // inbound ports at all. The platform stays fully functional; webhook
+    // push (lower latency) remains available the moment APP_URL is fixed.
     await upsertManualAction(connection.tenantId, {
       dedupKey: 'telegram-webhook-https',
       platform: 'Infrastructure',
-      title: 'Expose the platform on a public HTTPS URL so Telegram can deliver webhooks',
+      title: 'Optional: expose the platform on a public HTTPS URL for Telegram webhook push',
       officialUrl: 'https://core.telegram.org/bots/api#setwebhook',
       steps: [
-        'Deploy this application to a server with a public HTTPS URL (valid TLS certificate; Telegram supports ports 443, 80, 88, 8443), or start a tunnel during development (e.g. `ngrok http 3000` / `cloudflared tunnel --url http://localhost:3000`).',
-        'Set APP_URL in the .env file to that HTTPS base URL (e.g. APP_URL=https://your-domain.com).',
-        'Restart the server.',
-        'In the dashboard, open Connections → Telegram and press "Reconfigure webhook" (or reconnect the bot).',
+        'Not required — the bot is already working via long-polling (no public URL needed).',
+        'Webhook push gives slightly lower latency and less server load at high volume. To switch to it: deploy with a public HTTPS URL (valid TLS certificate; Telegram supports ports 443, 80, 88, 8443) or a tunnel (e.g. `cloudflared tunnel --url http://localhost:3000`).',
+        'Set APP_URL in the .env file to that HTTPS base URL (e.g. APP_URL=https://your-domain.com), restart the server, then press "Reconfigure webhook" on the Connections page.',
       ],
-      expectedResult:
-        'The Telegram connection health becomes CONNECTED and getWebhookInfo shows your URL with no last_error_message.',
-      whatToReturn: 'The HTTPS URL you deployed to, and the health status shown in the dashboard.',
+      expectedResult: 'The Telegram connection health shows "webhook" mode with no last_error_message.',
+      whatToReturn: 'Nothing — this is optional. Polling already works.',
     });
+    await startPolling(connection);
     await prisma.channelConnection.update({
       where: { id: connection.id },
       data: {
-        healthStatus: 'WEBHOOK_ERROR',
-        healthDetail: 'APP_URL is not a public HTTPS URL — webhook not configured. See Manual Actions.',
+        healthStatus: 'CONNECTED',
+        healthDetail: 'Using long-polling (no public HTTPS URL configured) — fully functional.',
         lastHealthCheckAt: new Date(),
+        metadata: { ...(connection.metadata as object), channelMode: 'polling' },
       },
     });
-    log.warn('APP_URL missing or not https — created manual action for webhook exposure');
+    log.info('APP_URL not public HTTPS — started long-polling fallback');
     return;
   }
+
+  // A usable public URL exists — prefer webhook push; stop any polling loop
+  // first so the same update is never processed through both transports.
+  await stopPolling(connection.id);
 
   const client = getTelegramClient(connection);
   const webhookUrl = `${appUrl.replace(/\/$/, '')}${telegramWebhookPath(connection.id)}`;
@@ -169,7 +178,7 @@ export async function configureTelegramWebhook(connectionId: string): Promise<vo
         ? ''
         : `getWebhookInfo returned url="${info.url}" (expected ${webhookUrl})`,
       lastHealthCheckAt: new Date(),
-      metadata: { ...(connection.metadata as object), webhookUrl },
+      metadata: { ...(connection.metadata as object), webhookUrl, channelMode: 'webhook' },
     },
   });
   if (healthy) {
@@ -184,6 +193,7 @@ export async function disconnectTelegram(tenantId: string): Promise<void> {
     where: { tenantId_channel: { tenantId, channel: 'TELEGRAM' } },
   });
   if (!connection) return;
+  await stopPolling(connection.id);
   try {
     await getTelegramClient(connection).deleteWebhook();
   } catch (err) {
@@ -222,17 +232,23 @@ export async function checkTelegramHealth(connection: ChannelConnection): Promis
     const info = await client.getWebhookInfo();
     const meta = connection.metadata as {
       webhookUrl?: string;
+      channelMode?: 'polling' | 'webhook';
       businessConnection?: { id: string; ownerUsername?: string | null; ownerName?: string };
     };
-    if (!info.url) return { status: 'WEBHOOK_ERROR', detail: 'No webhook is configured on this bot' };
-    if (meta.webhookUrl && info.url !== meta.webhookUrl) {
-      return { status: 'WEBHOOK_ERROR', detail: `Webhook points elsewhere: ${info.url}` };
+    const polling = meta.channelMode === 'polling' || isPolling(connection.id);
+    if (!info.url && !polling) {
+      return { status: 'WEBHOOK_ERROR', detail: 'No webhook is configured and polling is not running' };
     }
-    if (info.last_error_date && Date.now() / 1000 - info.last_error_date < 3600) {
-      return {
-        status: 'DEGRADED',
-        detail: `Recent delivery error: ${info.last_error_message ?? 'unknown'} (pending: ${info.pending_update_count})`,
-      };
+    if (!polling) {
+      if (meta.webhookUrl && info.url !== meta.webhookUrl) {
+        return { status: 'WEBHOOK_ERROR', detail: `Webhook points elsewhere: ${info.url}` };
+      }
+      if (info.last_error_date && Date.now() / 1000 - info.last_error_date < 3600) {
+        return {
+          status: 'DEGRADED',
+          detail: `Recent delivery error: ${info.last_error_message ?? 'unknown'} (pending: ${info.pending_update_count})`,
+        };
+      }
     }
 
     // Personal accounts (Telegram Business connections): live-verify and refresh.
@@ -277,7 +293,9 @@ export async function checkTelegramHealth(connection: ChannelConnection): Promis
 
     return {
       status: 'CONNECTED',
-      detail: `pending updates: ${info.pending_update_count}; ${personalDetail}`,
+      detail: polling
+        ? `mode: long-polling (no public URL needed); ${personalDetail}`
+        : `mode: webhook; pending updates: ${info.pending_update_count}; ${personalDetail}`,
     };
   } catch (err) {
     return { status: 'DEGRADED', detail: `getWebhookInfo failed: ${errorMessage(err)}` };

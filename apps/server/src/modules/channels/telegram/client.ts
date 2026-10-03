@@ -128,6 +128,32 @@ export class TelegramClient {
     return this.call<TgUser>('getMe');
   }
 
+  /**
+   * Long-poll for updates (the no-webhook alternative — Bot API §getUpdates).
+   * Telegram will not deliver updates via getUpdates while a webhook is set;
+   * callers must deleteWebhook() first. Passing `offset` acknowledges every
+   * update with id < offset as received, so Telegram won't resend it.
+   */
+  getUpdates(params: {
+    offset?: number;
+    timeout?: number;
+    allowedUpdates?: string[];
+  }): Promise<TgUpdate[]> {
+    return this.call<TgUpdate[]>('getUpdates', {
+      offset: params.offset,
+      timeout: params.timeout ?? 30,
+      allowed_updates: params.allowedUpdates ?? [
+        'message',
+        'edited_message',
+        'callback_query',
+        'business_connection',
+        'business_message',
+        'edited_business_message',
+        'deleted_business_messages',
+      ],
+    });
+  }
+
   setWebhook(params: {
     url: string;
     secretToken: string;

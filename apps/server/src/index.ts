@@ -55,6 +55,23 @@ async function main(): Promise<void> {
     logger.warn({ err: errorMessage(err) }, 'env auto-connect failed'),
   );
 
+  // Resume Telegram long-polling for any connection using it — in-process
+  // pollers do not survive a restart, so this re-arms them from stored state.
+  try {
+    const connections = await getPrisma().channelConnection.findMany({
+      where: { channel: 'TELEGRAM', status: 'connected' },
+    });
+    for (const connection of connections) {
+      const mode = (connection.metadata as { channelMode?: string }).channelMode;
+      if (mode === 'polling') {
+        const { startPolling } = await import('./modules/channels/telegram/polling.js');
+        await startPolling(connection);
+      }
+    }
+  } catch (err) {
+    logger.warn({ err: errorMessage(err) }, 'failed to resume telegram polling');
+  }
+
   // Housekeeping: session pruning, connection health checks, stuck-event
   // recovery (the durable retry backstop), and retention pruning.
   const housekeeping = setInterval(
@@ -71,6 +88,8 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'shutting down');
     clearInterval(housekeeping);
+    const { stopAllPolling } = await import('./modules/channels/telegram/polling.js');
+    await stopAllPolling().catch(() => undefined);
     await app.close().catch(() => undefined);
     await queue.stop().catch(() => undefined);
     await disconnectPrisma().catch(() => undefined);

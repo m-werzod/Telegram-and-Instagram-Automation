@@ -169,6 +169,11 @@ export async function runAgentPipeline(input: PipelineInput): Promise<PipelineOu
       schemaName: 'agent_decision',
       model: input.agent.model,
       maxTokens: 2048,
+      // Short conversational replies + a small classification schema don't
+      // need the model's deepest reasoning tier (the default) — cuts cost
+      // meaningfully with no quality loss for this workload shape, while
+      // staying above 'low' since escalation/lead-capture accuracy matters.
+      effort: 'medium',
     });
 
     if (result.refused) {
