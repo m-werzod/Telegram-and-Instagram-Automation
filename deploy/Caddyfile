@@ -1,6 +1,23 @@
 # SITE_ADDRESS is injected from .env (e.g. 77-93-152-116.sslip.io).
-# Caddy provisions and renews the TLS certificate automatically.
-{$SITE_ADDRESS}
+#
+# `tls internal` makes Caddy issue its own locally-generated certificate
+# instead of requesting one from Let's Encrypt. Use this whenever the host
+# sits behind something that intercepts public ACME validation on ports
+# 80/443 before it reaches this container (e.g. a shared-IP hosting
+# provider's gateway) — browsers show a one-time "not trusted" warning to
+# click past, but the site is otherwise fully functional over real HTTPS
+# (session cookies work, etc.). A server-side proxy (Vercel's rewrite, for
+# instance) will NOT accept this certificate — only an interactive browser
+# that a person can click "proceed anyway" on.
+#
+# Once the host is genuinely reachable on standard ports 80/443 from the
+# public internet (fixed hosting-provider routing, or a dedicated IP),
+# delete the `tls internal` line below and restart Caddy — it will then
+# request a real, publicly-trusted Let's Encrypt certificate automatically,
+# and every client (including Vercel's proxy) will work with no warning.
+{$SITE_ADDRESS} {
+	tls internal
 
-encode gzip
-reverse_proxy app:3000
+	encode gzip
+	reverse_proxy app:3000
+}
