@@ -131,7 +131,7 @@ export default function LeadDetail() {
             </div>
           </div>
 
-          {candidates.data && candidates.data.candidates.length > 0 && (
+          {candidates.data?.candidates && candidates.data.candidates.length > 0 && (
             <div className="card">
               <h3><IconChip icon={Copy} tone="violet" size={26} /> Ehtimoliy takrorlanishlar</h3>
               <p className="muted" style={{ fontSize: 12 }}>
@@ -197,7 +197,7 @@ export default function LeadDetail() {
             <div className="card">
               <h3><IconChip icon={MessageSquare} tone="blue" size={26} /> Xabarlar</h3>
               <div className="chat">
-                {messages.data?.messages.map((m) => (
+                {messages.data?.messages?.map((m) => (
                   <div key={m.id} className={`msg ${m.direction === 'INBOUND' ? 'in' : 'out'}`}>
                     {m.content}
                     <div className="meta">

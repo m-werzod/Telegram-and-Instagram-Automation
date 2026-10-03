@@ -36,7 +36,7 @@ export default function Handoffs() {
               <tr><th>Vaqt</th><th>Mijoz</th><th>Kanal</th><th>Sababi</th><th>Holat</th><th></th></tr>
             </thead>
             <tbody>
-              {q.data?.handoffs.map((h) => (
+              {q.data?.handoffs?.map((h) => (
                 <tr key={h.id}>
                   <td className="muted">{new Date(h.createdAt).toLocaleString('uz-UZ')}</td>
                   <td>
@@ -61,7 +61,7 @@ export default function Handoffs() {
                   </td>
                 </tr>
               ))}
-              {q.data?.handoffs.length === 0 && (
+              {q.data?.handoffs?.length === 0 && (
                 <tr><td colSpan={6} className="muted">Hozircha murojaatlar yo'q.</td></tr>
               )}
             </tbody>

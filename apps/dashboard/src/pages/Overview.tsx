@@ -66,7 +66,7 @@ export default function Overview() {
       <div className="grid cols-2">
         <div className="card">
           <h3><IconChip icon={Bot} tone="violet" size={26} /> AI Agentlar</h3>
-          {agents.data?.agents.map((a) => (
+          {agents.data?.agents?.map((a) => (
             <div className="row between" key={a.id} style={{ padding: '7px 0' }}>
               <div>
                 <Link to={`/agents/${a.id}`}>{a.name}</Link>
@@ -78,10 +78,10 @@ export default function Overview() {
         </div>
         <div className="card">
           <h3><IconChip icon={Plug} tone="green" size={26} /> Ulanishlar</h3>
-          {connections.data?.connections.length === 0 && (
+          {connections.data?.connections?.length === 0 && (
             <p className="muted">Hali hech qanday kanal ulanmagan — <Link to="/connections">Ulanishlar</Link> bo'limiga o'ting.</p>
           )}
-          {connections.data?.connections.map((c) => (
+          {connections.data?.connections?.map((c) => (
             <div className="row between" key={c.id} style={{ padding: '7px 0' }}>
               <div>
                 <strong>{c.channel === 'INSTAGRAM' ? 'Instagram' : 'Telegram'}</strong>{' '}

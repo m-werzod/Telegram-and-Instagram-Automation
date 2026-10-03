@@ -60,7 +60,7 @@ export default function Agents() {
           </p>
         </div>
       </div>
-      {agents.data?.agents.map((a) => {
+      {agents.data?.agents?.map((a) => {
         const ChannelIcon = CHANNEL_ICON[a.type];
         return (
           <div className="card" key={a.id}>

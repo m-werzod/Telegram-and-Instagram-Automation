@@ -35,11 +35,11 @@ export default function Media({ isAdmin }: { isAdmin: boolean }) {
       {isAdmin && <UploadCard onUploaded={refresh} />}
 
       <div className="grid cols-2">
-        {assets.data?.assets.map((a) => (
+        {assets.data?.assets?.map((a) => (
           <AssetCard key={a.id} asset={a} isAdmin={isAdmin} onChanged={refresh} />
         ))}
       </div>
-      {assets.data?.assets.length === 0 && (
+      {assets.data?.assets?.length === 0 && (
         <div className="card empty-state">
           <IconChip icon={ImageIcon} tone="pink" size={52} />
           <p className="muted">

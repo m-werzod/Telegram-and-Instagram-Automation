@@ -67,9 +67,12 @@ export default async function handler(req, res) {
   res.statusCode = upstream.status;
   for (const [key, value] of upstream.headers) {
     const k = key.toLowerCase();
-    if (k === 'content-encoding' || k === 'transfer-encoding' || k === 'set-cookie') continue;
+    if (k === 'content-encoding' || k === 'transfer-encoding' || k === 'set-cookie' || k === 'cache-control') continue;
     res.setHeader(key, value);
   }
+  // Every proxied response is dynamic, per-tenant, and often auth-scoped —
+  // never let Vercel's edge or an intermediate cache store or reuse it.
+  res.setHeader('cache-control', 'no-store, must-revalidate');
   const setCookie = upstream.headers.getSetCookie?.() ?? [];
   if (setCookie.length) res.setHeader('set-cookie', setCookie);
 

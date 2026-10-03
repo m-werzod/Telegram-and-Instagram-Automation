@@ -9,6 +9,7 @@ export default defineConfig({
   build: {
     outDir: process.env.VERCEL ? 'dist' : '../server/public/dashboard',
     emptyOutDir: true,
+    sourcemap: true,
   },
   server: {
     port: 5173,

@@ -86,7 +86,7 @@ export default function Leads() {
               </tr>
             </thead>
             <tbody>
-              {query.data?.leads.map((l) => (
+              {query.data?.leads?.map((l) => (
                 <tr key={l.id}>
                   <td>
                     <Link to={`/leads/${l.id}`}>
@@ -104,7 +104,7 @@ export default function Leads() {
                   </td>
                 </tr>
               ))}
-              {query.data?.leads.length === 0 && (
+              {query.data?.leads?.length === 0 && (
                 <tr><td colSpan={7} className="muted">Hali mijozlar yo'q.</td></tr>
               )}
             </tbody>

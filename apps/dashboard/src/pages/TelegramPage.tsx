@@ -136,10 +136,10 @@ export default function TelegramPage({ isAdmin }: { isAdmin: boolean }) {
           </ol>
         </details>
 
-        {accounts.data?.accounts.length === 0 && (
+        {accounts.data?.accounts?.length === 0 && (
           <p className="muted">Hali hech qanday shaxsiy akkaunt ulanmagan.</p>
         )}
-        {accounts.data?.accounts.map((acc) => (
+        {accounts.data?.accounts?.map((acc) => (
           <PersonalAccountCard
             key={acc.id}
             account={acc}

@@ -127,7 +127,7 @@ export default function AgentEdit() {
               onChange={(e) => set({ knowledgeBaseId: e.target.value || null })}
             >
               <option value="">Yo'q</option>
-              {kbQuery.data?.knowledgeBases.map((kb) => (
+              {kbQuery.data?.knowledgeBases?.map((kb) => (
                 <option key={kb.id} value={kb.id}>{kb.name}</option>
               ))}
             </select>
@@ -217,7 +217,7 @@ export default function AgentEdit() {
                 }
               >
                 <option value="">Yo'q</option>
-                {mediaQuery.data?.assets.map((a) => (
+                {mediaQuery.data?.assets?.map((a) => (
                   <option key={a.id} value={a.id}>{a.name}</option>
                 ))}
               </select>

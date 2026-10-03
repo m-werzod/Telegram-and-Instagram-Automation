@@ -68,7 +68,7 @@ function Events() {
             <tr><th>Qabul qilindi</th><th>Kanal</th><th>Hodisa kaliti</th><th>Holat</th><th>Urinishlar</th><th>Xatolik</th></tr>
           </thead>
           <tbody>
-            {q.data?.events.map((e) => (
+            {q.data?.events?.map((e) => (
               <tr key={e.id}>
                 <td className="muted">{new Date(e.receivedAt).toLocaleString('uz-UZ')}</td>
                 <td>{e.channel === 'INSTAGRAM' ? 'Instagram' : 'Telegram'}</td>
@@ -78,7 +78,7 @@ function Events() {
                 <td className="muted" style={{ maxWidth: 320 }}>{e.error ?? ''}</td>
               </tr>
             ))}
-            {q.data?.events.length === 0 && <tr><td colSpan={6} className="muted">Hali hodisalar yo'q.</td></tr>}
+            {q.data?.events?.length === 0 && <tr><td colSpan={6} className="muted">Hali hodisalar yo'q.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -100,7 +100,7 @@ function AiExecutions() {
             <tr><th>Vaqt</th><th>Agent</th><th>Model</th><th>Holat</th><th>Tokenlar (kirish/chiqish)</th><th>Tezlik</th><th>Qaror</th></tr>
           </thead>
           <tbody>
-            {q.data?.executions.map((e) => (
+            {q.data?.executions?.map((e) => (
               <tr key={e.id}>
                 <td className="muted">{new Date(e.createdAt).toLocaleString('uz-UZ')}</td>
                 <td>{e.agent?.name ?? '—'}</td>
@@ -121,7 +121,7 @@ function AiExecutions() {
                 </td>
               </tr>
             ))}
-            {q.data?.executions.length === 0 && <tr><td colSpan={7} className="muted">Hali ishga tushishlar yo'q.</td></tr>}
+            {q.data?.executions?.length === 0 && <tr><td colSpan={7} className="muted">Hali ishga tushishlar yo'q.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -143,7 +143,7 @@ function ToolExecutions() {
             <tr><th>Vaqt</th><th>Funksiya</th><th>Holat</th><th>Tezlik</th><th>Kirish</th><th>Xatolik</th></tr>
           </thead>
           <tbody>
-            {q.data?.executions.map((e) => (
+            {q.data?.executions?.map((e) => (
               <tr key={e.id}>
                 <td className="muted">{new Date(e.createdAt).toLocaleString('uz-UZ')}</td>
                 <td className="mono">{e.name}</td>
@@ -158,7 +158,7 @@ function ToolExecutions() {
                 <td className="muted">{e.error ?? ''}</td>
               </tr>
             ))}
-            {q.data?.executions.length === 0 && <tr><td colSpan={6} className="muted">Hali chaqiruvlar yo'q.</td></tr>}
+            {q.data?.executions?.length === 0 && <tr><td colSpan={6} className="muted">Hali chaqiruvlar yo'q.</td></tr>}
           </tbody>
         </table>
       </div>

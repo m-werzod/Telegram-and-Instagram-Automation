@@ -55,7 +55,7 @@ export default function Settings() {
         </div>
       </div>
 
-      {query.data?.settings.map((s) => (
+      {query.data?.settings?.map((s) => (
         <SettingCard key={s.key} setting={s} onChanged={() => qc.invalidateQueries({ queryKey: ['settings'] })} />
       ))}
 

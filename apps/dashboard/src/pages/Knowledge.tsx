@@ -44,7 +44,7 @@ export default function Knowledge() {
 
       <div className="card row">
         <select value={kbId ?? ''} onChange={(e) => setSelected(e.target.value)} style={{ width: 280 }}>
-          {bases.data?.knowledgeBases.map((kb) => (
+          {bases.data?.knowledgeBases?.map((kb) => (
             <option key={kb.id} value={kb.id}>
               {kb.name} ({kb._count?.documents ?? 0} hujjat, {kb._count?.chunks ?? 0} bo'lak)
             </option>
@@ -174,7 +174,7 @@ function Documents({ kbId }: { kbId: string }) {
               <tr><th>Sarlavha</th><th>Turi</th><th>Holat</th><th>Bo'laklar</th><th></th></tr>
             </thead>
             <tbody>
-              {docs.data?.documents.map((d) => (
+              {docs.data?.documents?.map((d) => (
                 <tr key={d.id}>
                   <td>{d.title}</td>
                   <td className="muted">{d.sourceType}</td>
@@ -195,7 +195,7 @@ function Documents({ kbId }: { kbId: string }) {
                   </td>
                 </tr>
               ))}
-              {docs.data?.documents.length === 0 && (
+              {docs.data?.documents?.length === 0 && (
                 <tr><td colSpan={5} className="muted">Hali hujjat yo'q.</td></tr>
               )}
             </tbody>
