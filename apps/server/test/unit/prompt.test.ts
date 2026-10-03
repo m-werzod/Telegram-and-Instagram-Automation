@@ -90,10 +90,17 @@ describe('buildSystemPrompt', () => {
     expect(prompt).not.toContain('Always respond in this language');
   });
 
-  it('a fixed language produces fixed-language wording naming it', () => {
+  it('a fixed language produces the strict policy naming it, with the ask-to-switch rule', () => {
     const prompt = buildSystemPrompt(makeAgent({ language: 'ru' }), 'Acme', 'telegram');
-    expect(prompt).toContain('Always respond in this language: ru.');
+    expect(prompt).toContain('STRICT LANGUAGE POLICY: you communicate ONLY in Russian ("ru")');
+    expect(prompt).toContain('politely ask them');
     expect(prompt).not.toContain('Detect the language');
+  });
+
+  it("the fixed language 'uz' is named in Uzbek and asks non-Uzbek writers to switch", () => {
+    const prompt = buildSystemPrompt(makeAgent({ language: 'uz' }), 'Turon', 'instagram_dm');
+    expect(prompt).toContain('ONLY in Uzbek (oʻzbek tili)');
+    expect(prompt).toContain('do NOT answer their question yet');
   });
 
   it('instagram_comment channel rules mention public visibility and the single private reply', () => {

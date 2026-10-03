@@ -21,6 +21,8 @@ export const agentSettingsSchema = z
     publicReplyOnPrivate: z.boolean().default(true),
     /** Skip replying to comments that only contain mentions/emoji. */
     skipTrivialComments: z.boolean().default(true),
+    /** Telegram bot: media asset sent as a photo when a user sends /start. */
+    welcomeImageMediaId: z.string().nullable().default(null),
   });
 
 export type AgentSettings = z.infer<typeof agentSettingsSchema>;
@@ -34,9 +36,18 @@ export interface RuleVerdict {
   allowSend: boolean;
   reply: string | null;
   privateReplyText: string | null;
+  /** Validated media asset id to send with the reply (image channels only). */
+  imageId: string | null;
   suppressedReason?: string;
   forceEscalate?: boolean;
 }
+
+/** Channels that can carry an image alongside the reply. */
+const IMAGE_CHANNELS: ReadonlySet<keyof typeof CHANNEL_RULES> = new Set([
+  'instagram_dm',
+  'telegram',
+  'telegram_personal',
+] as const);
 
 export async function applyBusinessRules(params: {
   agent: Agent;
@@ -44,6 +55,8 @@ export async function applyBusinessRules(params: {
   decision: AgentDecision;
   conversationId: string;
   channelKey: keyof typeof CHANNEL_RULES;
+  /** Ids of media assets that exist for this tenant — anything else is dropped. */
+  availableImageIds?: string[];
 }): Promise<RuleVerdict> {
   const { agent, settings, decision, conversationId, channelKey } = params;
   const rules = CHANNEL_RULES[channelKey];
@@ -51,9 +64,25 @@ export async function applyBusinessRules(params: {
   let reply = decision.reply?.trim() || null;
   let privateReplyText = decision.privateReplyText?.trim() || null;
 
+  // Image gate: must be a real asset id AND a channel that supports images.
+  let imageId: string | null = null;
+  if (
+    decision.sendImageId &&
+    IMAGE_CHANNELS.has(channelKey) &&
+    (params.availableImageIds ?? []).includes(decision.sendImageId)
+  ) {
+    imageId = decision.sendImageId;
+  }
+
   // 1. Spam/irrelevant → stay silent.
   if (decision.isSpamOrIrrelevant) {
-    return { allowSend: false, reply: null, privateReplyText: null, suppressedReason: 'spam_or_irrelevant' };
+    return {
+      allowSend: false,
+      reply: null,
+      privateReplyText: null,
+      imageId: null,
+      suppressedReason: 'spam_or_irrelevant',
+    };
   }
 
   // 2. Length clamps (hard platform limits are enforced again in channel clients).
@@ -73,6 +102,7 @@ export async function applyBusinessRules(params: {
       allowSend: false,
       reply: null,
       privateReplyText: null,
+      imageId: null,
       suppressedReason: 'banned_phrase',
       forceEscalate: true,
     };
@@ -95,11 +125,13 @@ export async function applyBusinessRules(params: {
         allowSend: false,
         reply: null,
         privateReplyText: null,
+        imageId: null,
         suppressedReason: 'rate_cooldown',
       };
     }
 
-    // 5. Duplicate-response guard: never send the same text twice in a row.
+    // 5. Duplicate-response guard: never send the same text twice in a row,
+    //    and never the same image twice in a row.
     if (reply) {
       const lastOutbound = await prisma.conversationMessage.findFirst({
         where: { conversationId, direction: 'OUTBOUND', role: 'AGENT' },
@@ -110,14 +142,33 @@ export async function applyBusinessRules(params: {
           allowSend: false,
           reply: null,
           privateReplyText: null,
+          imageId: null,
           suppressedReason: 'duplicate_reply',
         };
       }
     }
+    if (imageId) {
+      const lastImage = await prisma.conversationMessage.findFirst({
+        where: {
+          conversationId,
+          direction: 'OUTBOUND',
+          role: 'AGENT',
+          metadata: { path: ['imageAssetId'], equals: imageId },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+      });
+      if (lastImage && Date.now() - lastImage.createdAt.getTime() < 6 * 3600_000) {
+        imageId = null; // already sent this image recently — keep the text only
+      }
+    }
   }
 
+  // An image always accompanies a text reply; never image-only sends.
+  if (!reply) imageId = null;
+
   void agent;
-  return { allowSend: !!(reply || privateReplyText), reply, privateReplyText };
+  return { allowSend: !!(reply || privateReplyText), reply, privateReplyText, imageId };
 }
 
 /**

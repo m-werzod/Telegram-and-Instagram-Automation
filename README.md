@@ -8,19 +8,26 @@ A production-grade, multi-agent AI automation platform with a unified CRM:
 - **Instagram DM Agent** — full conversational agent for Instagram direct messages
   (24-hour messaging window, echo-safe, idempotent).
 - **Telegram Agent** — webhook-driven Telegram bot with `secret_token` verification.
-- **Telegram Personal Account Agent** — answers messages arriving in the owner's
-  **personal** Telegram chats via a Telegram Business connection (Telegram's
-  official "Chat Automation" mechanism; owner-scoped, owner-revocable, replies
-  appear from the personal account). No MTProto userbot — see
-  [docs/telegram-personal-account.md](docs/telegram-personal-account.md).
-- **Unified CRM** — leads with identity resolution across channels, qualification data,
-  notes, tags, statuses, manual merging.
+- **Telegram Personal Account Agents** — answer messages arriving in **personal**
+  Telegram chats via Telegram Business connections (Telegram's official "Chat
+  Automation" mechanism; owner-scoped, owner-revocable, replies appear from the
+  personal account). **Multiple people** can connect the same bot; each account is
+  managed independently (toggle, instructions, knowledge base). No MTProto
+  userbot — see [docs/telegram-personal-account.md](docs/telegram-personal-account.md).
+- **Unified CRM** — leads with identity resolution across channels, qualification data
+  (name, phone, category, location, purpose…), notes, tags, statuses, manual merging.
 - **Knowledge bases** — PDF/DOCX/TXT/MD/URL/text ingestion → chunking → embeddings
   (Voyage AI or OpenAI) → semantic retrieval with pgvector; full-text fallback.
+- **Media library** — upload images (price lists, maps, banners); agents attach the
+  right one to Instagram DMs / Telegram replies via a validated id (never a raw URL).
+- **Strict language policy** — agents can be pinned to one language (e.g. Uzbek);
+  users writing another language are politely asked to switch.
 - **Human handoff** — agents escalate; the conversation pauses until an operator resolves.
 - **Admin dashboard** — agent ON/OFF toggles (backend-enforced), instructions editor,
-  connection health, CRM, logs, and a *Manual Actions* queue that lists every step the
-  platform cannot automate, with official URLs and exact instructions.
+  connection health, CRM, media library, a *Settings* page to paste the Anthropic API
+  key and Meta credentials at runtime (encrypted, no redeploy), logs, and a *Manual
+  Actions* queue that lists every step the platform cannot automate, with official
+  URLs and exact instructions.
 
 All integration behavior is built on **verified current official APIs** — see
 [docs/integration-notes.md](docs/integration-notes.md) for the researched facts and sources.
@@ -79,7 +86,7 @@ pnpm db:seed          # creates tenant + admin user (ADMIN_EMAIL / ADMIN_PASSWOR
 pnpm dev              # server on :3000, dashboard dev server on :5173
 ```
 
-Open http://localhost:5173 and sign in — Login `Instagram`, Password `Telegram3737`
+Open http://localhost:5173 and sign in — Login `Admin`, Password `Admin3737`
 (the seed defaults; override with `ADMIN_LOGIN` / `ADMIN_PASSWORD`). Then:
 
 1. **Connections → Telegram**: paste a bot token from @BotFather. The platform validates

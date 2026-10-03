@@ -6,6 +6,7 @@ import { childLogger } from '../../../lib/logger.js';
 import { findOrCreateLead } from '../../crm/service.js';
 import { isTrivialComment, parseAgentSettings } from '../../engine/business-rules.js';
 import { runAgentPipeline } from '../../engine/pipeline.js';
+import { getMediaAssetWithData, publicMediaUrl } from '../../media/service.js';
 import { claimIdempotency, releaseIdempotency } from '../shared/idempotency.js';
 import { getInstagramClient } from './service.js';
 
@@ -407,6 +408,44 @@ async function processDm(
       log.info('dm reply sent');
     } else {
       log.info('dm reply already sent for this message — skipped (retry)');
+    }
+
+    // One optional image attachment: Meta downloads it from our public
+    // /files/media URL, so APP_URL must be a public HTTPS base.
+    if (outcome.verdict.imageId) {
+      const imageUrl = publicMediaUrl(outcome.verdict.imageId);
+      if (!imageUrl) {
+        log.warn('image requested but APP_URL is not a public HTTPS URL — skipping image');
+      } else if (await claimIdempotency(tenantId, `ig_dm_image:${mid}`)) {
+        const asset = await getMediaAssetWithData(tenantId, outcome.verdict.imageId);
+        if (asset) {
+          try {
+            const imgRes = await client.sendImageMessage(igsid, imageUrl);
+            await prisma.conversationMessage.create({
+              data: {
+                conversationId: conversation.id,
+                tenantId,
+                direction: 'OUTBOUND',
+                role: 'AGENT',
+                content: `[rasm: ${asset.name}]`,
+                externalMessageId: imgRes.message_id ?? `dm:${mid}:image`,
+                metadata: {
+                  type: 'image',
+                  imageAssetId: asset.id,
+                  aiExecutionId: outcome.aiExecutionId ?? null,
+                },
+              },
+            });
+            log.info('dm image sent');
+          } catch (err) {
+            if (isRetryable(err)) {
+              await releaseIdempotency(tenantId, `ig_dm_image:${mid}`);
+              throw err;
+            }
+            log.warn({ err: errorMessage(err) }, 'dm image failed permanently — text already sent');
+          }
+        }
+      }
     }
   }
 

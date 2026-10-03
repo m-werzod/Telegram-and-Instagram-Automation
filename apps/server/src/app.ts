@@ -17,7 +17,10 @@ import { authRoutes } from './api/auth-routes.js';
 import { connectionRoutes } from './api/connection-routes.js';
 import { crmRoutes } from './api/crm-routes.js';
 import { knowledgeRoutes } from './api/knowledge-routes.js';
+import { mediaRoutes } from './api/media-routes.js';
 import { opsRoutes } from './api/ops-routes.js';
+import { settingsRoutes } from './api/settings-routes.js';
+import { telegramPersonalRoutes } from './api/telegram-personal-routes.js';
 import { instagramWebhookRoutes } from './modules/channels/instagram/routes.js';
 import { telegramWebhookRoutes } from './modules/channels/telegram/routes.js';
 
@@ -119,12 +122,17 @@ export async function buildApp(env: Env): Promise<FastifyInstance> {
   await app.register(instagramWebhookRoutes);
   await app.register(telegramWebhookRoutes);
 
+  // Media (public raw serving + authenticated management).
+  await app.register(mediaRoutes);
+
   // Authenticated dashboard API.
   await app.register(authRoutes);
   await app.register(agentRoutes);
   await app.register(connectionRoutes);
+  await app.register(telegramPersonalRoutes);
   await app.register(crmRoutes);
   await app.register(knowledgeRoutes);
+  await app.register(settingsRoutes);
   await app.register(opsRoutes);
 
   // Dashboard SPA (built by apps/dashboard → public/dashboard).

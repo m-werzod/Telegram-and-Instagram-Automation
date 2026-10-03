@@ -88,6 +88,7 @@ describe('parseAgentSettings', () => {
       pauseOnEscalation: true,
       publicReplyOnPrivate: true,
       skipTrivialComments: true,
+      welcomeImageMediaId: null,
     });
   });
 
@@ -114,6 +115,7 @@ describe('parseAgentSettings', () => {
           pauseOnEscalation: false,
           publicReplyOnPrivate: false,
           skipTrivialComments: false,
+          welcomeImageMediaId: 'media-9',
         } as never,
       }),
     );
@@ -123,6 +125,7 @@ describe('parseAgentSettings', () => {
       pauseOnEscalation: false,
       publicReplyOnPrivate: false,
       skipTrivialComments: false,
+      welcomeImageMediaId: 'media-9',
     });
   });
 });
@@ -163,6 +166,7 @@ describe('applyBusinessRules', () => {
       allowSend: false,
       reply: null,
       privateReplyText: null,
+      imageId: null,
       suppressedReason: 'spam_or_irrelevant',
     });
     expect(countMessages).not.toHaveBeenCalled();
@@ -207,6 +211,7 @@ describe('applyBusinessRules', () => {
       allowSend: false,
       reply: null,
       privateReplyText: null,
+      imageId: null,
       suppressedReason: 'banned_phrase',
       forceEscalate: true,
     });
@@ -238,6 +243,7 @@ describe('applyBusinessRules', () => {
       allowSend: false,
       reply: null,
       privateReplyText: null,
+      imageId: null,
       suppressedReason: 'rate_cooldown',
     });
     expect(countMessages).toHaveBeenCalledWith(
@@ -280,6 +286,7 @@ describe('applyBusinessRules', () => {
       allowSend: false,
       reply: null,
       privateReplyText: null,
+      imageId: null,
       suppressedReason: 'duplicate_reply',
     });
   });
@@ -307,6 +314,7 @@ describe('applyBusinessRules', () => {
       allowSend: true,
       reply: 'Delivery costs $5.',
       privateReplyText: null,
+      imageId: null,
     });
   });
 
@@ -327,6 +335,61 @@ describe('applyBusinessRules', () => {
     });
     expect(verdict.allowSend).toBe(false);
     expect(verdict.reply).toBeNull();
+  });
+
+  it('a valid sendImageId on an image channel passes through as imageId', async () => {
+    const verdict = await applyBusinessRules({
+      ...baseParams(),
+      decision: makeDecision({ reply: 'Mana narxlar jadvali:', sendImageId: 'img-1' }),
+      availableImageIds: ['img-1', 'img-2'],
+    });
+    expect(verdict.allowSend).toBe(true);
+    expect(verdict.imageId).toBe('img-1');
+  });
+
+  it('an unknown sendImageId is dropped (hallucinated id)', async () => {
+    const verdict = await applyBusinessRules({
+      ...baseParams(),
+      decision: makeDecision({ reply: 'Here you go', sendImageId: 'made-up' }),
+      availableImageIds: ['img-1'],
+    });
+    expect(verdict.allowSend).toBe(true);
+    expect(verdict.imageId).toBeNull();
+  });
+
+  it('sendImageId is dropped on the public comment channel', async () => {
+    const verdict = await applyBusinessRules({
+      ...baseParams(),
+      channelKey: 'instagram_comment' as const,
+      decision: makeDecision({ reply: 'public answer', sendImageId: 'img-1' }),
+      availableImageIds: ['img-1'],
+    });
+    expect(verdict.imageId).toBeNull();
+  });
+
+  it('an image without a text reply is dropped (no image-only sends)', async () => {
+    const verdict = await applyBusinessRules({
+      ...baseParams(),
+      decision: makeDecision({ reply: null, sendImageId: 'img-1' }),
+      availableImageIds: ['img-1'],
+    });
+    expect(verdict.allowSend).toBe(false);
+    expect(verdict.imageId).toBeNull();
+  });
+
+  it('the same image sent recently in this conversation is not repeated', async () => {
+    findFirstMessage.mockImplementation(async (args: { where?: { metadata?: unknown } }) =>
+      args?.where && 'metadata' in args.where
+        ? { id: 'msg-img', content: '[rasm: Narxlar]', createdAt: new Date() }
+        : null,
+    );
+    const verdict = await applyBusinessRules({
+      ...baseParams(),
+      decision: makeDecision({ reply: 'Yana bir bor jadval:', sendImageId: 'img-1' }),
+      availableImageIds: ['img-1'],
+    });
+    expect(verdict.allowSend).toBe(true);
+    expect(verdict.imageId).toBeNull();
   });
 
   it('private-reply-only decision still passes rate/duplicate gates and is sendable', async () => {

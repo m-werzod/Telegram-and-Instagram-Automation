@@ -1,12 +1,14 @@
 services:
   db:
     image: pgvector/pgvector:pg17
+    restart: unless-stopped
     environment:
       POSTGRES_USER: platform
-      POSTGRES_PASSWORD: platform
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform}
       POSTGRES_DB: platform
     ports:
-      - "5432:5432"
+      # Localhost-only: never expose Postgres publicly on a VPS.
+      - "127.0.0.1:5432:5432"
     volumes:
       - db-data:/var/lib/postgresql/data
     healthcheck:
@@ -17,8 +19,10 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     ports:
-      - "6379:6379"
+      # Localhost-only: never expose Redis publicly on a VPS.
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis-data:/data
     healthcheck:
@@ -30,6 +34,7 @@ services:
   app:
     build: .
     profiles: ["app"] # start with: docker compose --profile app up -d
+    restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
@@ -38,15 +43,36 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
-      DATABASE_URL: postgresql://platform:platform@db:5432/platform
+      DATABASE_URL: postgresql://platform:${POSTGRES_PASSWORD:-platform}@db:5432/platform
       REDIS_URL: redis://redis:6379
     env_file:
       - .env
     ports:
-      - "3000:3000"
-    # No app volume: all state (including uploaded knowledge files) lives in
-    # Postgres/Redis — the app container is stateless.
+      # Localhost-only: public traffic comes in through Caddy (TLS).
+      - "127.0.0.1:3000:3000"
+    # No app volume: all state (including uploaded knowledge files and media)
+    # lives in Postgres/Redis — the app container is stateless.
+
+  # HTTPS reverse proxy with automatic certificates (Let's Encrypt/ZeroSSL).
+  # SITE_ADDRESS comes from .env, e.g. SITE_ADDRESS=77-93-152-116.sslip.io
+  caddy:
+    image: caddy:2
+    profiles: ["app"]
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
 
 volumes:
   db-data:
   redis-data:
+  caddy-data:
+  caddy-config:

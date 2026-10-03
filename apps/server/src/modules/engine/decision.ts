@@ -35,6 +35,10 @@ export const agentDecisionSchema = z.object({
       phone: z.string().nullable(),
       email: z.string().nullable(),
       requestedService: z.string().nullable(),
+      /** Course/licence category the person wants (e.g. "B", "BC", "A"). */
+      category: z.string().nullable(),
+      /** Why they are reaching out / what they want to achieve. */
+      purpose: z.string().nullable(),
       budget: z.string().nullable(),
       location: z.string().nullable(),
       timeline: z.string().nullable(),
@@ -56,6 +60,12 @@ export const agentDecisionSchema = z.object({
    */
   sendPrivateReply: z.boolean(),
   privateReplyText: z.string().nullable(),
+  /**
+   * Id of ONE image from <available_images> to send along with the reply
+   * (Instagram DMs and Telegram chats only — public comments cannot carry
+   * images). null = no image. Invalid ids are dropped by the business rules.
+   */
+  sendImageId: z.string().nullable(),
 });
 
 export type AgentDecision = z.infer<typeof agentDecisionSchema>;

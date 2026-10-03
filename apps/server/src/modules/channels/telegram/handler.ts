@@ -1,16 +1,19 @@
-import type { ChannelConnection, WebhookEvent } from '@prisma/client';
+import type { Agent, ChannelConnection, WebhookEvent } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { getPrisma } from '../../../db/client.js';
 import { AppError, errorMessage, isRetryable } from '../../../lib/errors.js';
 import { childLogger } from '../../../lib/logger.js';
 import { findOrCreateLead } from '../../crm/service.js';
+import { parseAgentSettings } from '../../engine/business-rules.js';
 import { runAgentPipeline } from '../../engine/pipeline.js';
 import { resolveManualAction } from '../../manual-actions/service.js';
+import { getMediaAssetWithData } from '../../media/service.js';
 import { claimIdempotency, releaseIdempotency } from '../shared/idempotency.js';
 import { getTelegramClient } from './service.js';
 import {
   splitMessage,
   TELEGRAM_MAX_MESSAGE,
+  type TelegramClient,
   type TgBusinessConnection,
   type TgUpdate,
 } from './client.js';
@@ -158,6 +161,22 @@ export async function processTelegramEvent(event: WebhookEvent): Promise<void> {
     return;
   }
 
+  // Welcome image on /start (configured per agent in the dashboard).
+  if (/^\/start\b/.test(message.text)) {
+    const welcomeImageId = parseAgentSettings(agent).welcomeImageMediaId;
+    if (welcomeImageId) {
+      await sendAgentImage({
+        client: getTelegramClient(connection),
+        tenantId,
+        conversationId: conversation.id,
+        chatId: message.chat.id,
+        imageAssetId: welcomeImageId,
+        idemKey: `tg_welcome:${connection.id}:${update.update_id}`,
+        log,
+      });
+    }
+  }
+
   const outcome = await runAgentPipeline({
     tenantId,
     tenantName: tenant.name,
@@ -210,6 +229,19 @@ export async function processTelegramEvent(event: WebhookEvent): Promise<void> {
         },
       });
     }
+    // One optional image per reply, validated against the media library.
+    if (outcome.verdict.imageId) {
+      await sendAgentImage({
+        client,
+        tenantId,
+        conversationId: conversation.id,
+        chatId: message.chat.id,
+        imageAssetId: outcome.verdict.imageId,
+        idemKey: `tg_photo:${connection.id}:${update.update_id}`,
+        aiExecutionId: outcome.aiExecutionId ?? null,
+        log,
+      });
+    }
     await prisma.conversation.update({
       where: { id: conversation.id },
       data: { lastMessageAt: new Date(), agentId: agent.id },
@@ -220,9 +252,76 @@ export async function processTelegramEvent(event: WebhookEvent): Promise<void> {
   log.info({ outcome: outcome.status }, 'telegram event processed');
 }
 
+/**
+ * Send one media-library image into a chat, idempotently. Non-retryable
+ * failures are logged and swallowed (the text reply already went out);
+ * retryable failures release the claim and propagate to the queue retry.
+ */
+async function sendAgentImage(params: {
+  client: TelegramClient;
+  tenantId: string;
+  conversationId: string;
+  chatId: number | string;
+  imageAssetId: string;
+  idemKey: string;
+  businessConnectionId?: string;
+  aiExecutionId?: string | null;
+  log: ReturnType<typeof childLogger>;
+}): Promise<void> {
+  const prisma = getPrisma();
+  if (!(await claimIdempotency(params.tenantId, params.idemKey))) return;
+
+  const asset = await getMediaAssetWithData(params.tenantId, params.imageAssetId);
+  if (!asset) {
+    params.log.warn({ imageAssetId: params.imageAssetId }, 'image asset not found — skipping photo');
+    return;
+  }
+
+  let sent;
+  try {
+    sent = await params.client.sendPhoto(
+      params.chatId,
+      {
+        data: Buffer.from(asset.data),
+        filename: `${asset.id}.${asset.mimeType.split('/')[1] ?? 'jpg'}`,
+        contentType: asset.mimeType,
+      },
+      params.businessConnectionId ? { businessConnectionId: params.businessConnectionId } : {},
+    );
+  } catch (err) {
+    if (isRetryable(err)) {
+      await releaseIdempotency(params.tenantId, params.idemKey);
+      throw err;
+    }
+    params.log.warn({ err: errorMessage(err) }, 'sendPhoto failed permanently — text reply already sent');
+    return;
+  }
+
+  await prisma.conversationMessage.create({
+    data: {
+      conversationId: params.conversationId,
+      tenantId: params.tenantId,
+      direction: 'OUTBOUND',
+      role: 'AGENT',
+      content: `[rasm: ${asset.name}]`,
+      externalMessageId: sent ? String(sent.message_id) : params.idemKey,
+      metadata: {
+        type: 'image',
+        imageAssetId: asset.id,
+        aiExecutionId: params.aiExecutionId ?? null,
+      },
+    },
+  });
+}
+
 // ─────────────── Personal account (Telegram Business connection) ───────────────
 
-/** The owner connected/edited/disconnected the bot on their PERSONAL account. */
+/**
+ * A person connected/edited/disconnected the bot on their PERSONAL account.
+ * Each connection gets its own TelegramPersonalAccount row — multiple people
+ * can hand their personal chats to this bot, each managed independently from
+ * the dashboard (enable toggle, instructions, knowledge base).
+ */
 async function handleBusinessConnection(
   event: WebhookEvent,
   connection: ChannelConnection,
@@ -232,6 +331,34 @@ async function handleBusinessConnection(
   const stored = toStoredBusinessConnection(bc);
   const log = childLogger({ module: 'telegram-business', webhookEventId: event.id });
 
+  await prisma.telegramPersonalAccount.upsert({
+    where: { businessConnectionId: stored.id },
+    create: {
+      tenantId: connection.tenantId,
+      businessConnectionId: stored.id,
+      ownerUserId: String(stored.ownerId),
+      ownerName: stored.ownerName,
+      ownerUsername: stored.ownerUsername,
+      userChatId: String(stored.userChatId),
+      isEnabled: stored.isEnabled,
+      canReply: stored.canReply,
+      canReadMessages: stored.canReadMessages,
+      connectedAt: new Date(stored.connectedAt * 1000),
+      displayName: stored.ownerUsername ? `@${stored.ownerUsername}` : stored.ownerName,
+      // enabled stays false: the admin must explicitly turn automation ON.
+    },
+    update: {
+      ownerUserId: String(stored.ownerId),
+      ownerName: stored.ownerName,
+      ownerUsername: stored.ownerUsername,
+      userChatId: String(stored.userChatId),
+      isEnabled: stored.isEnabled,
+      canReply: stored.canReply,
+      canReadMessages: stored.canReadMessages,
+    },
+  });
+
+  // Legacy single-connection mirror kept for the Connections health display.
   await prisma.channelConnection.update({
     where: { id: connection.id },
     data: {
@@ -246,6 +373,7 @@ async function handleBusinessConnection(
   log.info(
     {
       owner: stored.ownerUsername ?? stored.ownerName,
+      businessConnectionId: stored.id,
       isEnabled: stored.isEnabled,
       canReply: stored.canReply,
     },
@@ -254,7 +382,7 @@ async function handleBusinessConnection(
   await markEvent(event.id, 'PROCESSED');
 }
 
-/** A message in one of the owner's personal private chats (spec: Personal Agent). */
+/** A message in a private chat of one of the connected personal accounts. */
 async function processPersonalMessage(
   event: WebhookEvent,
   connection: ChannelConnection,
@@ -266,19 +394,56 @@ async function processPersonalMessage(
   const message = update.business_message!;
   const log = childLogger({ module: 'telegram-personal', requestId, webhookEventId: event.id });
 
-  const biz = (connection.metadata as { businessConnection?: StoredBusinessConnection })
-    .businessConnection;
-  if (!biz || (message.business_connection_id && biz.id !== message.business_connection_id)) {
-    await markEvent(event.id, 'SKIPPED', 'no stored business connection for this message — reconnect the personal account');
+  if (!message.business_connection_id) {
+    await markEvent(event.id, 'SKIPPED', 'business message without business_connection_id');
     return;
   }
+  // Route to the connected personal account this message belongs to.
+  let account = await prisma.telegramPersonalAccount.findUnique({
+    where: { businessConnectionId: message.business_connection_id },
+  });
+  if (!account || account.tenantId !== tenantId) {
+    // Connection predates the account table or state was lost — re-sync from
+    // the live API so the account appears in the dashboard, still disabled.
+    try {
+      const bc = await getTelegramClient(connection).getBusinessConnection(
+        message.business_connection_id,
+      );
+      const stored = toStoredBusinessConnection(bc);
+      account = await prisma.telegramPersonalAccount.upsert({
+        where: { businessConnectionId: stored.id },
+        create: {
+          tenantId,
+          businessConnectionId: stored.id,
+          ownerUserId: String(stored.ownerId),
+          ownerName: stored.ownerName,
+          ownerUsername: stored.ownerUsername,
+          userChatId: String(stored.userChatId),
+          isEnabled: stored.isEnabled,
+          canReply: stored.canReply,
+          canReadMessages: stored.canReadMessages,
+          connectedAt: new Date(stored.connectedAt * 1000),
+          displayName: stored.ownerUsername ? `@${stored.ownerUsername}` : stored.ownerName,
+        },
+        update: {},
+      });
+    } catch (err) {
+      await markEvent(
+        event.id,
+        'SKIPPED',
+        `unknown business connection (${errorMessage(err)}) — reconnect the personal account`,
+      );
+      return;
+    }
+  }
+
   if (!message.text || !message.from || message.chat.type !== 'private') {
     await markEvent(event.id, 'SKIPPED', 'not a processable personal-chat text message');
     return;
   }
   // The owner's own outgoing messages also arrive as business messages —
   // never treat the owner as a customer or auto-reply to them.
-  if (message.from.id === biz.ownerId || message.from.is_bot) {
+  if (String(message.from.id) === account.ownerUserId || message.from.is_bot) {
     await markEvent(event.id, 'SKIPPED', 'message from the account owner (or a bot) — recorded only');
     return;
   }
@@ -290,7 +455,7 @@ async function processPersonalMessage(
   }
 
   // Same TELEGRAM identity namespace as the bot flow: a person who messaged
-  // both the bot and the owner's personal account resolves to ONE lead.
+  // both the bot and a connected personal account resolves to ONE lead.
   const fullName = [message.from.first_name, message.from.last_name].filter(Boolean).join(' ');
   const lead = await findOrCreateLead(
     tenantId,
@@ -298,22 +463,27 @@ async function processPersonalMessage(
     { name: fullName || null, source: 'TELEGRAM' },
   );
 
+  // Thread id is scoped by the business connection: two connected accounts
+  // chatting with the same customer must stay two separate conversations.
   const conversation = await prisma.conversation.upsert({
     where: {
       tenantId_kind_externalThreadId: {
         tenantId,
         kind: 'TELEGRAM_PERSONAL_CHAT',
-        externalThreadId: String(message.chat.id),
+        externalThreadId: `${account.businessConnectionId}:${message.chat.id}`,
       },
     },
     create: {
       tenantId,
       kind: 'TELEGRAM_PERSONAL_CHAT',
       channel: 'TELEGRAM',
-      externalThreadId: String(message.chat.id),
+      externalThreadId: `${account.businessConnectionId}:${message.chat.id}`,
       leadId: lead.id,
       lastMessageAt: new Date(),
-      metadata: { businessConnectionId: biz.id },
+      metadata: {
+        businessConnectionId: account.businessConnectionId,
+        personalAccount: account.displayName || account.ownerName,
+      },
     },
     update: { lastMessageAt: new Date(), leadId: lead.id },
   });
@@ -344,11 +514,19 @@ async function processPersonalMessage(
     await markEvent(event.id, 'SKIPPED', agent ? 'personal agent disabled' : 'no personal agent configured');
     return;
   }
-  if (!biz.isEnabled) {
+  if (!account.enabled) {
+    await markEvent(
+      event.id,
+      'SKIPPED',
+      `automation for ${account.displayName || account.ownerName} is OFF — enable it on the Telegram page`,
+    );
+    return;
+  }
+  if (!account.isEnabled) {
     await markEvent(event.id, 'SKIPPED', 'business connection disabled by the account owner');
     return;
   }
-  if (!biz.canReply) {
+  if (!account.canReply) {
     await markEvent(event.id, 'SKIPPED', 'owner did not grant the "reply to messages" permission');
     return;
   }
@@ -359,10 +537,18 @@ async function processPersonalMessage(
     return;
   }
 
+  // Per-account overrides: instructions and knowledge base fall back to the
+  // TELEGRAM_PERSONAL agent defaults when not set for this account.
+  const effectiveAgent: Agent = {
+    ...agent,
+    systemInstructions: account.instructions?.trim() ? account.instructions : agent.systemInstructions,
+    knowledgeBaseId: account.knowledgeBaseId ?? agent.knowledgeBaseId,
+  };
+
   const outcome = await runAgentPipeline({
     tenantId,
     tenantName: tenant.name,
-    agent,
+    agent: effectiveAgent,
     conversationId: conversation.id,
     lead,
     channelKey: 'telegram_personal',
@@ -377,8 +563,9 @@ async function processPersonalMessage(
 
   if (outcome.status === 'replied' && outcome.verdict?.reply) {
     const client = getTelegramClient(connection);
+    const bcId = account.businessConnectionId;
     try {
-      await client.sendChatAction(message.chat.id, 'typing', { businessConnectionId: biz.id });
+      await client.sendChatAction(message.chat.id, 'typing', { businessConnectionId: bcId });
     } catch {
       // cosmetic
     }
@@ -388,7 +575,7 @@ async function processPersonalMessage(
       if (!(await claimIdempotency(tenantId, key))) continue;
       let sent;
       try {
-        sent = await client.sendMessage(message.chat.id, parts[i]!, { businessConnectionId: biz.id });
+        sent = await client.sendMessage(message.chat.id, parts[i]!, { businessConnectionId: bcId });
       } catch (err) {
         if (isRetryable(err)) {
           await releaseIdempotency(tenantId, key);
@@ -406,6 +593,19 @@ async function processPersonalMessage(
           externalMessageId: s ? String(s.message_id) : `tgp:${update.update_id}:${i}`,
           metadata: { aiExecutionId: outcome.aiExecutionId ?? null, personal: true },
         },
+      });
+    }
+    if (outcome.verdict.imageId) {
+      await sendAgentImage({
+        client,
+        tenantId,
+        conversationId: conversation.id,
+        chatId: message.chat.id,
+        imageAssetId: outcome.verdict.imageId,
+        idemKey: `tg_personal_photo:${connection.id}:${update.update_id}`,
+        businessConnectionId: bcId,
+        aiExecutionId: outcome.aiExecutionId ?? null,
+        log,
       });
     }
     await prisma.conversation.update({

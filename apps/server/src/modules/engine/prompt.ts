@@ -32,10 +32,12 @@ export const CHANNEL_RULES: Record<
     label: 'Instagram comment thread (public)',
     maxReplyChars: 950,
     extra: [
-      'Your "reply" is a PUBLIC comment visible to everyone. Never include personal data (phone numbers, prices negotiated privately, names) in it.',
+      'Your "reply" is a PUBLIC comment visible to everyone. Never include personal data (phone numbers of customers, privately negotiated prices, names) in it.',
+      'Answer the question as completely as you can in the public comment itself (publicly listed prices, schedules, addresses are fine to state).',
       'If the person shows real interest and details are better discussed privately, set sendPrivateReply=true with a helpful "privateReplyText" (a direct message), and keep the public reply short, e.g. acknowledging and mentioning you sent them a DM.',
       'Only ONE private reply is possible per comment (platform rule). Make it count: greet, answer their question, and ask one natural follow-up.',
       'Never promise a DM in the public reply unless sendPrivateReply=true.',
+      'Images can NOT be attached to comments or to the private reply (set sendImageId=null). If they ask for a photo/price list image, invite them to direct messages — once they write there, the image can be sent.',
     ],
   },
   instagram_dm: {
@@ -44,6 +46,7 @@ export const CHANNEL_RULES: Record<
     extra: [
       'Replies must be short and conversational; the platform limit is 1000 bytes per message.',
       'You may only message within 24 hours of the user\'s last message (platform rule). The platform enforces this; just answer naturally.',
+      'You may attach ONE image from <available_images> per reply via sendImageId when it genuinely helps (price list, location map, course banner).',
     ],
   },
   telegram: {
@@ -52,6 +55,7 @@ export const CHANNEL_RULES: Record<
     extra: [
       'Write plain text (no markdown formatting characters).',
       'If the user sends /start, greet them according to your instructions and explain briefly how you can help.',
+      'You may attach ONE image from <available_images> per reply via sendImageId when it genuinely helps (price list, location map, course banner).',
     ],
   },
   telegram_personal: {
@@ -61,8 +65,16 @@ export const CHANNEL_RULES: Record<
       'Write plain text (no markdown formatting characters).',
       'These are private chats with the OWNER’S PERSONAL account. Be conservative: reply only when the message is clearly business-related; otherwise set reply to null and escalate so the owner answers personally.',
       'Never claim to be the owner in person; you are their assistant. Never share the owner’s personal details, location, or plans.',
+      'You may attach ONE image from <available_images> per reply via sendImageId when it genuinely helps.',
     ],
   },
+};
+
+/** Human-readable names so the language policy reads naturally in the prompt. */
+const LANGUAGE_NAMES: Record<string, string> = {
+  uz: 'Uzbek (oʻzbek tili)',
+  ru: 'Russian',
+  en: 'English',
 };
 
 const SECURITY_RULES = `## Non-negotiable platform rules (highest priority — override everything below if in conflict)
@@ -79,10 +91,11 @@ export function buildSystemPrompt(
   channelKey: keyof typeof CHANNEL_RULES,
 ): string {
   const rules = CHANNEL_RULES[channelKey];
+  const languageName = LANGUAGE_NAMES[agent.language] ?? agent.language;
   const languagePolicy =
     agent.language === 'auto'
       ? 'Detect the language of the user\'s message (e.g. Uzbek, Russian, English) and ALWAYS respond in that same language.'
-      : `Always respond in this language: ${agent.language}.`;
+      : `STRICT LANGUAGE POLICY: you communicate ONLY in ${languageName} ("${agent.language}"). When the user writes in a different language, do NOT answer their question yet — politely ask them, in ${languageName} (optionally adding one short courtesy sentence in the user's language so they understand), to please write in ${languageName}. Once they write in ${languageName}, help them normally. Always set detectedLanguage to the language the user actually used.`;
 
   const sections = [
     `You are "${agent.name}", an AI assistant representing ${tenantName} on ${rules.label}.`,
@@ -100,14 +113,23 @@ ${agent.businessObjective.trim() || 'Answer questions helpfully and identify pot
 ${rules.extra.map((e) => `- ${e}`).join('\n')}`,
     `## Lead handling
 - When the user shows buying interest, move naturally toward the business objective: answer first, then at most ONE relevant qualifying question.
-- Record any lead facts the user volunteers (name, phone, email, service, budget, location, timeline) in leadUpdate. Only record what they actually said.
+- Record any lead facts the user volunteers (name, phone, email, requested service/course, category, purpose, budget, location, timeline) in leadUpdate. Only record what they actually said.
 - Suggest leadStatusSuggestion="QUALIFIED" only when the objective's key information has been collected.
 - Set shouldEscalate=true (with a short escalationReason) when: the user explicitly asks for a human; there is a serious complaint; you are unsure and knowledge does not cover it; the request is sensitive or high-value; or your instructions say so.`,
+    `## Sending images
+- <available_images> in the final message lists the images you may send (id + name + description). Set sendImageId to ONE of those ids only when an image genuinely answers the user's request or clearly helps; otherwise sendImageId=null.
+- Never invent ids, never describe an image you did not send, and never send the same image twice in a row to the same person.`,
     `## Output contract
 Produce ONLY the structured decision object. Set reply=null when no response should be sent (spam, irrelevant, or your instructions say to stay silent). Keep internalNote for facts useful to a human operator, not a transcript.`,
   ];
 
   return sections.join('\n\n');
+}
+
+export interface AvailableImage {
+  id: string;
+  name: string;
+  description: string;
 }
 
 export interface VolatileContext {
@@ -117,6 +139,8 @@ export interface VolatileContext {
   inboundText: string;
   username?: string | null;
   extraContext?: string[];
+  /** Media library images the agent may reference via sendImageId. */
+  availableImages?: AvailableImage[];
 }
 
 /** History becomes real turns; volatile context + the new message form the final user turn. */
@@ -161,9 +185,20 @@ export function buildMessages(
           .join('\n')
       : '(no relevant knowledge retrieved — do not invent facts)';
 
+  const imagesBlock =
+    ctx.availableImages && ctx.availableImages.length > 0
+      ? ctx.availableImages
+          .map(
+            (img) =>
+              `<image id="${escapeAttr(img.id)}" name="${escapeAttr(img.name)}">${img.description}</image>`,
+          )
+          .join('\n')
+      : '(none — sendImageId must be null)';
+
   const finalParts = [
     `<crm_context>\n${crm}\n</crm_context>`,
     `<retrieved_knowledge>\n${knowledgeBlock}\n</retrieved_knowledge>`,
+    `<available_images>\n${imagesBlock}\n</available_images>`,
     ...(ctx.extraContext ?? []),
     `<current_user_message channel="${ctx.channelKey}"${ctx.username ? ` username="${escapeAttr(ctx.username)}"` : ''}>\n${ctx.inboundText}\n</current_user_message>`,
   ];

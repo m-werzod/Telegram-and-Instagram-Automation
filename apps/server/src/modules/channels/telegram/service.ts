@@ -81,9 +81,12 @@ export async function connectTelegram(tenantId: string, botToken: string): Promi
   // 3. Automatic webhook configuration when a public HTTPS URL is available.
   await configureTelegramWebhook(connection.id);
 
-  // 4. Register the /start command description (best effort).
+  // 4. Register commands and bot profile texts (best effort, Uzbek-first).
   try {
-    await client.setMyCommands([{ command: 'start', description: 'Start a conversation' }]);
+    await client.setMyCommands([
+      { command: 'start', description: "Suhbatni boshlash / Start" },
+      { command: 'yordam', description: "Yordam va ma'lumot" },
+    ]);
   } catch (err) {
     log.warn({ err: errorMessage(err) }, 'setMyCommands failed (non-fatal)');
   }
@@ -232,26 +235,44 @@ export async function checkTelegramHealth(connection: ChannelConnection): Promis
       };
     }
 
-    // Personal account (Telegram Business connection): live-verify and refresh.
-    let personalDetail = 'personal account: not connected';
-    if (meta.businessConnection?.id) {
-      try {
-        const bc = await client.getBusinessConnection(meta.businessConnection.id);
-        const { toStoredBusinessConnection } = await import('./handler.js');
-        const stored = toStoredBusinessConnection(bc);
-        await getPrisma().channelConnection.update({
-          where: { id: connection.id },
-          data: {
-            metadata: { ...(connection.metadata as object), businessConnection: stored as never },
-          },
-        });
-        const owner = stored.ownerUsername ? `@${stored.ownerUsername}` : stored.ownerName;
-        personalDetail = stored.isEnabled
-          ? `personal account: connected as ${owner} (${stored.canReply ? 'can reply' : 'READ-ONLY — grant "reply to messages"'})`
-          : `personal account: connection disabled by ${owner}`;
-      } catch (err) {
-        personalDetail = `personal account: connection check failed (${errorMessage(err)})`;
+    // Personal accounts (Telegram Business connections): live-verify and refresh.
+    let personalDetail = 'personal accounts: none connected';
+    const accounts = await getPrisma().telegramPersonalAccount.findMany({
+      where: { tenantId: connection.tenantId },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (accounts.length > 0) {
+      const summaries: string[] = [];
+      for (const account of accounts) {
+        try {
+          const bc = await client.getBusinessConnection(account.businessConnectionId);
+          const { toStoredBusinessConnection } = await import('./handler.js');
+          const stored = toStoredBusinessConnection(bc);
+          await getPrisma().telegramPersonalAccount.update({
+            where: { id: account.id },
+            data: {
+              isEnabled: stored.isEnabled,
+              canReply: stored.canReply,
+              canReadMessages: stored.canReadMessages,
+              ownerName: stored.ownerName,
+              ownerUsername: stored.ownerUsername,
+            },
+          });
+          const owner = stored.ownerUsername ? `@${stored.ownerUsername}` : stored.ownerName;
+          summaries.push(
+            !stored.isEnabled
+              ? `${owner}: disconnected by owner`
+              : !stored.canReply
+                ? `${owner}: READ-ONLY (grant "reply to messages")`
+                : `${owner}: ${account.enabled ? 'automation ON' : 'automation OFF'}`,
+          );
+        } catch (err) {
+          summaries.push(`${account.displayName || account.ownerName}: check failed (${errorMessage(err)})`);
+        }
       }
+      personalDetail = `personal accounts (${accounts.length}): ${summaries.join('; ')}`;
+    } else if (meta.businessConnection?.id) {
+      personalDetail = 'personal account: legacy connection — reconnect it in Telegram to manage it here';
     }
 
     return {

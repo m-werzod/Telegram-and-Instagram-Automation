@@ -79,8 +79,8 @@ describe('loadEnv', () => {
     expect(env.ENCRYPTION_KEY).toBe(VALID_KEY);
     expect(env.APP_URL).toBeUndefined();
     expect(env.REDIS_URL).toBeUndefined();
-    expect(env.ADMIN_LOGIN).toBe('Instagram');
-    expect(env.TENANT_NAME).toBe('Default Business');
+    expect(env.ADMIN_LOGIN).toBe('Admin');
+    expect(env.TENANT_NAME).toBe('Turon Avtomaktab');
   });
 
   it('defaults NODE_ENV to development when unset everywhere', () => {

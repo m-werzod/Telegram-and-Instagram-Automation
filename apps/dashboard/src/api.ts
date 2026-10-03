@@ -33,6 +33,8 @@ export const api = {
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) }),
   postForm: <T>(path: string, form: FormData) => request<T>(path, { method: 'POST', body: form }),
+  put: <T>(path: string, body: unknown) =>
+    request<T>(path, { method: 'PUT', body: JSON.stringify(body) }),
   patch: <T>(path: string, body: unknown) =>
     request<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
@@ -139,4 +141,47 @@ export interface Handoff {
   createdAt: string;
   lead: { id: string; name: string | null; username: string | null; status: string } | null;
   conversation: { id: string; kind: string; channel: string; status: string };
+}
+
+export interface MediaAsset {
+  id: string;
+  name: string;
+  description: string;
+  mimeType: string;
+  sizeBytes: number;
+  createdAt: string;
+}
+
+export interface SettingStatus {
+  key: string;
+  source: 'platform' | 'env' | 'unset';
+  maskedValue: string;
+}
+
+export interface SettingsResponse {
+  settings: SettingStatus[];
+  urls: {
+    appUrl: string | null;
+    instagramWebhook: string | null;
+    mediaBase: string | null;
+  };
+}
+
+export interface TelegramPersonalAccount {
+  id: string;
+  businessConnectionId: string;
+  ownerUserId: string;
+  ownerName: string;
+  ownerUsername: string | null;
+  isEnabled: boolean;
+  canReply: boolean;
+  canReadMessages: boolean;
+  connectedAt: string;
+  enabled: boolean;
+  displayName: string;
+  instructions: string | null;
+  knowledgeBaseId: string | null;
+  knowledgeBase?: { id: string; name: string } | null;
+  createdAt: string;
+  updatedAt: string;
 }

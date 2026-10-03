@@ -119,6 +119,22 @@ export class InstagramClient {
     });
   }
 
+  /**
+   * DM an image to a user (24-hour window). Meta fetches the image from the
+   * given public HTTPS URL (JPEG/PNG/WebP/GIF, ≤8MB).
+   */
+  sendImageMessage(
+    igsid: string,
+    imageUrl: string,
+  ): Promise<{ recipient_id?: string; message_id?: string }> {
+    return this.request('POST', `/me/messages`, {
+      json: {
+        recipient: { id: igsid },
+        message: { attachment: { type: 'image', payload: { url: imageUrl } } },
+      },
+    });
+  }
+
   /** Enable webhook delivery for this account (required in addition to app-level config). */
   subscribeApps(fields: string[]): Promise<{ success?: boolean }> {
     return this.request('POST', `/me/subscribed_apps`, {

@@ -1,0 +1,6 @@
+# SITE_ADDRESS is injected from .env (e.g. 77-93-152-116.sslip.io).
+# Caddy provisions and renews the TLS certificate automatically.
+{$SITE_ADDRESS}
+
+encode gzip
+reverse_proxy app:3000

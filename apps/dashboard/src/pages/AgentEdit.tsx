@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
-import { api, ApiError, type Agent, type KnowledgeBase } from '../api';
+import { api, ApiError, type Agent, type KnowledgeBase, type MediaAsset } from '../api';
 
 interface Settings {
   bannedPhrases: string[];
@@ -9,6 +9,7 @@ interface Settings {
   pauseOnEscalation: boolean;
   publicReplyOnPrivate: boolean;
   skipTrivialComments: boolean;
+  welcomeImageMediaId: string | null;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -17,6 +18,7 @@ const DEFAULT_SETTINGS: Settings = {
   pauseOnEscalation: true,
   publicReplyOnPrivate: true,
   skipTrivialComments: true,
+  welcomeImageMediaId: null,
 };
 
 export default function AgentEdit() {
@@ -30,6 +32,10 @@ export default function AgentEdit() {
   const kbQuery = useQuery({
     queryKey: ['knowledge-bases'],
     queryFn: () => api.get<{ knowledgeBases: KnowledgeBase[] }>('/api/knowledge-bases'),
+  });
+  const mediaQuery = useQuery({
+    queryKey: ['media'],
+    queryFn: () => api.get<{ assets: MediaAsset[] }>('/api/media'),
   });
 
   const [form, setForm] = useState<Partial<Agent> | null>(null);
@@ -186,6 +192,39 @@ export default function AgentEdit() {
           )}
         </div>
       </div>
+
+      {form.type === 'TELEGRAM' && (
+        <div className="card">
+          <h3>Welcome image (/start)</h3>
+          <p className="muted" style={{ fontSize: 13 }}>
+            Sent as a photo when someone opens the bot with /start — e.g. the school's banner or
+            price list. Upload images on the Media page.
+          </p>
+          <div className="grid cols-2">
+            <label className="field">
+              <span className="name">Image</span>
+              <select
+                value={settings.welcomeImageMediaId ?? ''}
+                onChange={(e) =>
+                  setSettings({ ...settings, welcomeImageMediaId: e.target.value || null })
+                }
+              >
+                <option value="">None</option>
+                {mediaQuery.data?.assets.map((a) => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
+                ))}
+              </select>
+            </label>
+            {settings.welcomeImageMediaId && (
+              <img
+                src={`/files/media/${settings.welcomeImageMediaId}`}
+                alt="Welcome"
+                style={{ maxHeight: 120, borderRadius: 8, alignSelf: 'end' }}
+              />
+            )}
+          </div>
+        </div>
+      )}
 
       {error && <div className="error-text">{error}</div>}
       {saved && <div className="success-text">Saved ✓</div>}

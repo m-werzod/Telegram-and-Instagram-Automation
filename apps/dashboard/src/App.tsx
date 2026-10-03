@@ -6,6 +6,9 @@ import Overview from './pages/Overview';
 import Agents from './pages/Agents';
 import AgentEdit from './pages/AgentEdit';
 import Connections from './pages/Connections';
+import TelegramPage from './pages/TelegramPage';
+import Media from './pages/Media';
+import Settings from './pages/Settings';
 import Leads from './pages/Leads';
 import LeadDetail from './pages/LeadDetail';
 import Knowledge from './pages/Knowledge';
@@ -44,9 +47,12 @@ export default function App() {
         <NavLink to="/" end>Overview</NavLink>
         <NavLink to="/agents">Agents</NavLink>
         <NavLink to="/connections">Connections</NavLink>
+        <NavLink to="/telegram">Telegram</NavLink>
         <NavLink to="/leads">CRM · Leads</NavLink>
         <NavLink to="/handoffs">Handoffs</NavLink>
         <NavLink to="/knowledge">Knowledge</NavLink>
+        <NavLink to="/media">Media · Images</NavLink>
+        {user.role === 'ADMIN' && <NavLink to="/settings">Settings</NavLink>}
         <NavLink to="/logs">Logs</NavLink>
         <NavLink to="/manual-actions">Manual actions</NavLink>
         <div className="spacer" />
@@ -62,6 +68,9 @@ export default function App() {
           <Route path="/agents" element={<Agents />} />
           <Route path="/agents/:id" element={<AgentEdit />} />
           <Route path="/connections" element={<Connections isAdmin={user.role === 'ADMIN'} />} />
+          <Route path="/telegram" element={<TelegramPage isAdmin={user.role === 'ADMIN'} />} />
+          <Route path="/media" element={<Media isAdmin={user.role === 'ADMIN'} />} />
+          {user.role === 'ADMIN' && <Route path="/settings" element={<Settings />} />}
           <Route path="/leads" element={<Leads />} />
           <Route path="/leads/:id" element={<LeadDetail />} />
           <Route path="/knowledge" element={<Knowledge />} />

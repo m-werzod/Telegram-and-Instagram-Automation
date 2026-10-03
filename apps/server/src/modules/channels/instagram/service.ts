@@ -112,7 +112,7 @@ export async function createMetaManualActions(tenantId: string): Promise<void> {
       'Open https://developers.facebook.com/apps/ and select your app (must be a Business type app with the Instagram product added).',
       'In the left menu choose "Instagram" → "API setup with Instagram business login" → section "3. Configure webhooks" (or Products → Webhooks → subscribe to the "Instagram" object).',
       `Callback URL: enter exactly ${callbackUrl}`,
-      `Verify token: enter exactly the value of META_VERIFY_TOKEN from your .env file${env.META_VERIFY_TOKEN ? '' : ' (set META_VERIFY_TOKEN in .env first, then restart the server)'}.`,
+      'Verify token: enter exactly the META_VERIFY_TOKEN value shown on the dashboard Settings page (set one there first if it is empty — any random string you choose).',
       'Click "Verify and save" — the platform answers the verification challenge automatically.',
       'Subscribe to the webhook fields: "comments" and "messages".',
       'Set the app to Live mode (toggle at the top of the App Dashboard). Meta does not deliver webhooks for apps in Development mode.',

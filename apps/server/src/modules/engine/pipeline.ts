@@ -2,7 +2,7 @@ import type { Agent, Lead, LeadStatus } from '@prisma/client';
 import { getPrisma } from '../../db/client.js';
 import { errorMessage } from '../../lib/errors.js';
 import { childLogger } from '../../lib/logger.js';
-import { getAIProvider } from '../ai/index.js';
+import { resolveAIProvider } from '../ai/index.js';
 import { searchKnowledge, type RetrievedChunk } from '../knowledge/service.js';
 import {
   applyBusinessRules,
@@ -112,7 +112,20 @@ export async function runAgentPipeline(input: PipelineInput): Promise<PipelineOu
     }
   }
 
-  const provider = getAIProvider(input.agent.provider);
+  // Media library the agent may reference via sendImageId (image channels only).
+  let availableImages: Array<{ id: string; name: string; description: string }> = [];
+  try {
+    availableImages = await prisma.mediaAsset.findMany({
+      where: { tenantId: input.tenantId },
+      orderBy: { createdAt: 'asc' },
+      take: 30,
+      select: { id: true, name: true, description: true },
+    });
+  } catch (err) {
+    log.warn({ err: errorMessage(err) }, 'media list failed — continuing without images');
+  }
+
+  const provider = await resolveAIProvider(input.tenantId, input.agent.provider);
   if (!provider) {
     return {
       status: 'failed',
@@ -132,6 +145,7 @@ export async function runAgentPipeline(input: PipelineInput): Promise<PipelineOu
     inboundText: input.inboundText,
     username: input.username,
     extraContext: input.extraContext,
+    availableImages,
   });
 
   const started = Date.now();
@@ -207,6 +221,7 @@ export async function runAgentPipeline(input: PipelineInput): Promise<PipelineOu
     decision,
     conversationId: conversation.id,
     channelKey: input.channelKey,
+    availableImageIds: availableImages.map((img) => img.id),
   });
 
   // Controlled tool executions from the validated decision (spec §21).
@@ -312,6 +327,8 @@ function pickQualification(decision: AgentDecision): Record<string, unknown> | u
   if (!q) return undefined;
   const out: Record<string, unknown> = {};
   if (q.requestedService) out.requestedService = q.requestedService;
+  if (q.category) out.category = q.category;
+  if (q.purpose) out.purpose = q.purpose;
   if (q.budget) out.budget = q.budget;
   if (q.location) out.location = q.location;
   if (q.timeline) out.timeline = q.timeline;

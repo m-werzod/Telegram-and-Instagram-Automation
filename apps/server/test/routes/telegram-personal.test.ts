@@ -43,6 +43,29 @@ const connectionRow = (bizOver: Partial<Record<string, unknown>> | null = {}) =>
   metadata: bizOver === null ? {} : { businessConnection: storedBiz(bizOver) },
 });
 
+/** A TelegramPersonalAccount row as the handler reads it from the table. */
+const accountRow = (over: Partial<Record<string, unknown>> = {}) => ({
+  id: 'tpa-1',
+  tenantId: 'tenant-1',
+  businessConnectionId: BIZ_ID,
+  ownerUserId: String(OWNER_ID),
+  ownerName: 'Sherzod',
+  ownerUsername: 'sherzod',
+  userChatId: String(OWNER_ID),
+  isEnabled: true,
+  canReply: true,
+  canReadMessages: true,
+  connectedAt: new Date(),
+  enabled: true, // admin automation toggle
+  displayName: '@sherzod',
+  instructions: null,
+  knowledgeBaseId: null,
+  settings: {},
+  createdAt: new Date(),
+  updatedAt: new Date(),
+  ...over,
+});
+
 const personalAgent = (enabled = true) => ({
   id: 'agent-personal',
   tenantId: 'tenant-1',
@@ -121,6 +144,9 @@ describe('Telegram personal account (Business connection)', () => {
     prisma.idempotencyKey.create.mockResolvedValue({ id: 'idem-1' });
     prisma.channelConnection.update.mockResolvedValue({});
     prisma.manualAction.updateMany.mockResolvedValue({ count: 1 });
+    prisma.telegramPersonalAccount.findUnique.mockResolvedValue(accountRow());
+    prisma.telegramPersonalAccount.upsert.mockResolvedValue(accountRow());
+    prisma.mediaAsset.findMany.mockResolvedValue([]);
 
     fetchCalls = [];
     vi.stubGlobal(
@@ -171,6 +197,18 @@ describe('Telegram personal account (Business connection)', () => {
       canReply: true,
       isEnabled: true,
     });
+    // A per-account row is created/updated — automation stays OFF by default.
+    const upsertArg = prisma.telegramPersonalAccount.upsert.mock.calls[0]![0] as {
+      where: { businessConnectionId: string };
+      create: Record<string, unknown>;
+    };
+    expect(upsertArg.where.businessConnectionId).toBe(BIZ_ID);
+    expect(upsertArg.create).toMatchObject({
+      tenantId: 'tenant-1',
+      ownerUserId: String(OWNER_ID),
+      canReply: true,
+    });
+    expect(upsertArg.create.enabled).toBeUndefined();
     // Manual action auto-resolved on successful connection.
     expect(prisma.manualAction.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -241,7 +279,8 @@ describe('Telegram personal account (Business connection)', () => {
   });
 
   it('missing can_reply right → no send attempted', async () => {
-    prisma.channelConnection.findUnique.mockResolvedValue(connectionRow({ canReply: false }));
+    prisma.channelConnection.findUnique.mockResolvedValue(connectionRow());
+    prisma.telegramPersonalAccount.findUnique.mockResolvedValue(accountRow({ canReply: false }));
     prisma.agent.findUnique.mockResolvedValue(personalAgent(true));
 
     await processTelegramEvent(eventRow(businessMessageUpdate()));
@@ -250,12 +289,61 @@ describe('Telegram personal account (Business connection)', () => {
   });
 
   it('connection disabled by the owner → no send attempted', async () => {
-    prisma.channelConnection.findUnique.mockResolvedValue(connectionRow({ isEnabled: false }));
+    prisma.channelConnection.findUnique.mockResolvedValue(connectionRow());
+    prisma.telegramPersonalAccount.findUnique.mockResolvedValue(accountRow({ isEnabled: false }));
     prisma.agent.findUnique.mockResolvedValue(personalAgent(true));
 
     await processTelegramEvent(eventRow(businessMessageUpdate()));
     expect(ai.calls).toHaveLength(0);
     expect(fetchCalls.filter((c) => c.url.endsWith('/sendMessage'))).toHaveLength(0);
+  });
+
+  it('per-account automation toggle OFF → recorded, no AI call, no reply', async () => {
+    prisma.channelConnection.findUnique.mockResolvedValue(connectionRow());
+    prisma.telegramPersonalAccount.findUnique.mockResolvedValue(accountRow({ enabled: false }));
+    prisma.agent.findUnique.mockResolvedValue(personalAgent(true));
+
+    await processTelegramEvent(eventRow(businessMessageUpdate()));
+
+    const inbound = prisma.conversationMessage.create.mock.calls.find(
+      (c: any) => c[0].data.direction === 'INBOUND',
+    );
+    expect(inbound).toBeTruthy();
+    expect(ai.calls).toHaveLength(0);
+    expect(fetchCalls.filter((c) => c.url.endsWith('/sendMessage'))).toHaveLength(0);
+    expect(prisma.webhookEvent.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'SKIPPED' }) }),
+    );
+  });
+
+  it('per-account instructions override the default agent instructions in the prompt', async () => {
+    prisma.channelConnection.findUnique.mockResolvedValue(connectionRow());
+    prisma.telegramPersonalAccount.findUnique.mockResolvedValue(
+      accountRow({ instructions: 'FAQAT avtomaktab mavzusida javob bering (maxsus akkaunt).' }),
+    );
+    prisma.agent.findUnique.mockResolvedValue(personalAgent(true));
+    ai.respondWith({ reply: 'Xo‘p!' });
+
+    await processTelegramEvent(eventRow(businessMessageUpdate()));
+
+    expect(ai.calls).toHaveLength(1);
+    expect(String(ai.calls[0]!.system)).toContain('FAQAT avtomaktab mavzusida javob bering (maxsus akkaunt).');
+    expect(String(ai.calls[0]!.system)).not.toContain('Be helpful.');
+  });
+
+  it('two connected accounts: the conversation thread id is scoped by business connection', async () => {
+    prisma.channelConnection.findUnique.mockResolvedValue(connectionRow());
+    prisma.agent.findUnique.mockResolvedValue(personalAgent(true));
+    ai.respondWith({ reply: 'Salom!' });
+
+    await processTelegramEvent(eventRow(businessMessageUpdate()));
+
+    const upsertArg = prisma.conversation.upsert.mock.calls[0]![0] as {
+      where: { tenantId_kind_externalThreadId: { externalThreadId: string } };
+    };
+    expect(upsertArg.where.tenantId_kind_externalThreadId.externalThreadId).toBe(
+      `${BIZ_ID}:${CUSTOMER_ID}`,
+    );
   });
 
   it('message older than the 24h business window → skipped before any send', async () => {

@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { getEnv } from '../../../config/env.js';
 import { getPrisma } from '../../../db/client.js';
 import { hmacSha256Hex, safeEqual } from '../../../lib/crypto.js';
+import { resolveGlobalSetting } from '../../settings/service.js';
 import { recordAndEnqueueEvent } from '../../webhooks/service.js';
 import { markInstagramWebhookVerified } from './service.js';
 
@@ -17,13 +17,13 @@ import { markInstagramWebhookVerified } from './service.js';
  */
 export async function instagramWebhookRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/webhooks/instagram', { config: { rateLimit: false } }, async (req, reply) => {
-    const env = getEnv();
+    const verifyToken = await resolveGlobalSetting('META_VERIFY_TOKEN');
     const q = req.query as Record<string, string | undefined>;
     const mode = q['hub.mode'];
     const token = q['hub.verify_token'];
     const challenge = q['hub.challenge'];
 
-    if (mode === 'subscribe' && env.META_VERIFY_TOKEN && token === env.META_VERIFY_TOKEN && challenge) {
+    if (mode === 'subscribe' && verifyToken && token === verifyToken && challenge) {
       req.log.info('instagram webhook verification succeeded');
       return reply.code(200).type('text/plain').send(challenge);
     }
@@ -32,9 +32,9 @@ export async function instagramWebhookRoutes(app: FastifyInstance): Promise<void
   });
 
   app.post('/api/webhooks/instagram', { config: { rateLimit: false } }, async (req, reply) => {
-    const env = getEnv();
-    if (!env.META_APP_SECRET) {
-      req.log.error('META_APP_SECRET not configured — rejecting webhook');
+    const appSecret = await resolveGlobalSetting('META_APP_SECRET');
+    if (!appSecret) {
+      req.log.error('META_APP_SECRET not configured (Settings page or env) — rejecting webhook');
       return reply.code(503).send();
     }
 
@@ -43,7 +43,7 @@ export async function instagramWebhookRoutes(app: FastifyInstance): Promise<void
     if (typeof signature !== 'string' || !rawBody) {
       return reply.code(401).send();
     }
-    const expected = `sha256=${hmacSha256Hex(env.META_APP_SECRET, rawBody)}`;
+    const expected = `sha256=${hmacSha256Hex(appSecret, rawBody)}`;
     if (!safeEqual(signature, expected)) {
       req.log.warn('instagram webhook signature mismatch');
       return reply.code(401).send();

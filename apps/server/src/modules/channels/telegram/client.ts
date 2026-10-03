@@ -74,14 +74,15 @@ export class TelegramClient {
     private readonly baseUrl = 'https://api.telegram.org',
   ) {}
 
-  private async call<T>(method: string, params?: Record<string, unknown>): Promise<T> {
+  private async call<T>(method: string, params?: Record<string, unknown> | FormData): Promise<T> {
+    const isForm = params instanceof FormData;
     let res: Response;
     try {
       res = await fetch(`${this.baseUrl}/bot${this.token}/${method}`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: params ? JSON.stringify(params) : undefined,
-        signal: AbortSignal.timeout(30_000),
+        headers: isForm ? undefined : { 'content-type': 'application/json' },
+        body: isForm ? params : params ? JSON.stringify(params) : undefined,
+        signal: AbortSignal.timeout(60_000),
       });
     } catch (err) {
       throw new ExternalApiError('telegram', `network failure calling ${method}: ${String(err)}`, {
@@ -209,6 +210,40 @@ export class TelegramClient {
 
   setMyCommands(commands: Array<{ command: string; description: string }>): Promise<boolean> {
     return this.call<boolean>('setMyCommands', { commands });
+  }
+
+  /** Bot description shown on the empty chat screen (≤512 chars). */
+  setMyDescription(description: string): Promise<boolean> {
+    return this.call<boolean>('setMyDescription', { description: description.slice(0, 512) });
+  }
+
+  /** Short description shown on the bot's profile page (≤120 chars). */
+  setMyShortDescription(shortDescription: string): Promise<boolean> {
+    return this.call<boolean>('setMyShortDescription', {
+      short_description: shortDescription.slice(0, 120),
+    });
+  }
+
+  /**
+   * Sends a photo. Bytes are uploaded via multipart/form-data (no public URL
+   * required). Caption ≤1024 chars. With businessConnectionId the photo is
+   * sent on behalf of the connected personal account.
+   */
+  async sendPhoto(
+    chatId: number | string,
+    photo: { data: Buffer; filename: string; contentType: string },
+    opts: { caption?: string; businessConnectionId?: string } = {},
+  ): Promise<TgMessage> {
+    const form = new FormData();
+    form.set('chat_id', String(chatId));
+    form.set(
+      'photo',
+      new Blob([new Uint8Array(photo.data)], { type: photo.contentType }),
+      photo.filename,
+    );
+    if (opts.caption) form.set('caption', opts.caption.slice(0, 1024));
+    if (opts.businessConnectionId) form.set('business_connection_id', opts.businessConnectionId);
+    return this.call<TgMessage>('sendPhoto', form);
   }
 }
 

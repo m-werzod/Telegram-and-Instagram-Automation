@@ -66,9 +66,9 @@ const envSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().optional(),
 
   // Initial admin credentials (used by prisma seed only)
-  ADMIN_LOGIN: z.string().min(1).default('Instagram'),
-  ADMIN_PASSWORD: z.string().min(8).default('Telegram3737'),
-  TENANT_NAME: z.string().default('Default Business'),
+  ADMIN_LOGIN: z.string().min(1).default('Admin'),
+  ADMIN_PASSWORD: z.string().min(8).default('Admin3737'),
+  TENANT_NAME: z.string().default('Turon Avtomaktab'),
 });
 
 export type Env = z.infer<typeof envSchema>;

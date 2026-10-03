@@ -409,7 +409,7 @@ d('end-to-end flows', () => {
     ai.respondWith({
       reply: 'We have it in stock! Would you like home delivery?',
       intent: 'product_interest',
-      leadUpdate: { name: null, phone: null, email: null, requestedService: 'sneakers', budget: null, location: null, timeline: null },
+      leadUpdate: { name: null, phone: null, email: null, requestedService: 'sneakers', category: null, purpose: null, budget: null, location: null, timeline: null },
     });
 
     await postInstagram(dmPayload('mid-500', 'Do you have these sneakers in 42?'));

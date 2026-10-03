@@ -35,6 +35,9 @@ model Tenant {
   manualActions      ManualAction[]
   auditLogs          AuditLog[]
   idempotencyKeys    IdempotencyKey[]
+  mediaAssets        MediaAsset[]
+  appSettings        AppSetting[]
+  telegramPersonalAccounts TelegramPersonalAccount[]
 }
 
 enum UserRole {
@@ -124,6 +127,7 @@ model KnowledgeBase {
   documents KnowledgeDocument[]
   chunks    KnowledgeChunk[]
   agents    Agent[]
+  telegramPersonalAccounts TelegramPersonalAccount[]
 
   @@index([tenantId])
 }
@@ -523,6 +527,90 @@ model AuditLog {
   createdAt  DateTime @default(now())
 
   @@index([tenantId, createdAt])
+}
+
+// ─────────────────────────────── Media library ───────────────────────────────
+
+/**
+ * Images the agents may send to customers (price lists, branch maps, course
+ * banners…). Bytes live in Postgres (stateless app, same rationale as
+ * KnowledgeFile); served publicly at GET /files/media/:id so Instagram can
+ * fetch attachment URLs. The AI only ever references assets by id from the
+ * list offered in its prompt — never arbitrary URLs.
+ */
+model MediaAsset {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name        String
+  /** Shown to the AI to decide WHEN this image is relevant — write it clearly. */
+  description String   @default("")
+  mimeType    String
+  sizeBytes   Int      @default(0)
+  data        Bytes
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId])
+}
+
+// ─────────────────────────────── Platform settings ───────────────────────────────
+
+/**
+ * Operator-editable platform configuration stored encrypted (AES-256-GCM) —
+ * e.g. the Anthropic API key and Meta app credentials pasted in the dashboard
+ * Settings page. Values here take precedence over the matching env variables,
+ * so keys can be rotated without redeploying.
+ */
+model AppSetting {
+  id             String   @id @default(cuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  key            String
+  valueEncrypted String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([tenantId, key])
+}
+
+// ─────────────────────────── Telegram personal accounts ───────────────────────────
+
+/**
+ * One row per PERSONAL Telegram account connected to the bot via Telegram
+ * Business (Settings → Chat Automation). Multiple people can connect the same
+ * bot; each gets independent admin controls: an enable toggle, optional
+ * per-account instructions and knowledge base (falling back to the
+ * TELEGRAM_PERSONAL agent's defaults when null).
+ */
+model TelegramPersonalAccount {
+  id                   String   @id @default(cuid())
+  tenantId             String
+  tenant               Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /** Telegram's business_connection.id — stable handle for sending replies. */
+  businessConnectionId String   @unique
+  /** Telegram user id of the account owner (string: exceeds 2^31). */
+  ownerUserId          String
+  ownerName            String   @default("")
+  ownerUsername        String?
+  userChatId           String   @default("")
+  /** Telegram-side state: owner can disable the connection in their app. */
+  isEnabled            Boolean  @default(true)
+  canReply             Boolean  @default(false)
+  canReadMessages      Boolean  @default(false)
+  connectedAt          DateTime @default(now())
+  /** Admin-side automation toggle — OFF by default until explicitly enabled. */
+  enabled              Boolean  @default(false)
+  displayName          String   @default("")
+  /** Per-account instruction override; null → TELEGRAM_PERSONAL agent default. */
+  instructions         String?
+  knowledgeBaseId      String?
+  knowledgeBase        KnowledgeBase? @relation(fields: [knowledgeBaseId], references: [id], onDelete: SetNull)
+  settings             Json     @default("{}")
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([tenantId])
 }
 
 // Generic idempotency guard for side effects (e.g. "reply to comment X", "private reply to comment X").

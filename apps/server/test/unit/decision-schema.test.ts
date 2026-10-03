@@ -16,6 +16,8 @@ function fullDecision(): AgentDecision {
       phone: '+15550001111',
       email: 'alice@example.com',
       requestedService: 'automation setup',
+      category: 'B',
+      purpose: 'personal car',
       budget: '$500',
       location: 'Tashkent',
       timeline: 'next month',
@@ -28,6 +30,7 @@ function fullDecision(): AgentDecision {
     internalNote: 'Asked for pricing tier details.',
     sendPrivateReply: true,
     privateReplyText: 'Sent you a DM with details!',
+    sendImageId: null,
   };
 }
 
@@ -123,6 +126,8 @@ describe('agentDecisionSchema', () => {
       phone: null,
       email: 'bob@example.com',
       requestedService: null,
+      category: 'BC',
+      purpose: null,
       budget: '1000 USD',
       location: null,
       timeline: 'ASAP',

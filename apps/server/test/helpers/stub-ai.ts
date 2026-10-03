@@ -22,6 +22,7 @@ export function makeDecision(overrides: Partial<AgentDecision> = {}): AgentDecis
     internalNote: null,
     sendPrivateReply: false,
     privateReplyText: null,
+    sendImageId: null,
     ...overrides,
   };
 }

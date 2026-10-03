@@ -32,6 +32,24 @@ async function main(): Promise<void> {
     logger.warn({ err: errorMessage(err) }, 'recovery sweep failed (db not migrated yet?)');
   }
 
+  // Ingest knowledge documents that never completed (seeded docs start
+  // PENDING; a crash can also strand PROCESSING) — chunks them at boot.
+  try {
+    const pendingDocs = await getPrisma().knowledgeDocument.findMany({
+      where: { status: { in: ['PENDING', 'PROCESSING'] } },
+      select: { id: true, tenantId: true },
+      take: 100,
+    });
+    for (const doc of pendingDocs) {
+      await queue.enqueue('knowledge:ingest', { documentId: doc.id, tenantId: doc.tenantId });
+    }
+    if (pendingDocs.length > 0) {
+      logger.info({ count: pendingDocs.length }, 'queued pending knowledge documents for ingestion');
+    }
+  } catch (err) {
+    logger.warn({ err: errorMessage(err) }, 'pending-knowledge sweep failed');
+  }
+
   // Seed channel connections from env if provided and not yet connected (spec §15).
   await autoConnectFromEnv().catch((err) =>
     logger.warn({ err: errorMessage(err) }, 'env auto-connect failed'),
