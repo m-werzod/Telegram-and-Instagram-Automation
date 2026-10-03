@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
+import { ArrowLeft, User2, Copy, MessageSquare, StickyNote, Send } from 'lucide-react';
 import { api, type Lead } from '../api';
 import { StatusBadge } from './Leads';
+import IconChip from '../components/IconChip';
 
 interface Message {
   id: string;
@@ -11,6 +13,16 @@ interface Message {
   content: string;
   createdAt: string;
 }
+
+const STATUS_OPTIONS = ['NEW', 'OPEN', 'QUALIFIED', 'CONVERTED', 'LOST', 'SPAM'];
+const QUALIFICATION_LABEL: Record<string, string> = {
+  requestedService: 'So\'ralgan xizmat',
+  category: 'Toifa',
+  purpose: 'Maqsad',
+  budget: 'Byudjet',
+  location: 'Hudud',
+  timeline: 'Muddat',
+};
 
 export default function LeadDetail() {
   const { id } = useParams<{ id: string }>();
@@ -51,22 +63,27 @@ export default function LeadDetail() {
   });
 
   const lead = leadQuery.data?.lead;
-  if (!lead) return <p className="muted">Loading…</p>;
+  if (!lead) return <p className="muted">Yuklanmoqda…</p>;
 
   return (
     <>
-      <p><Link to="/leads">← Leads</Link></p>
-      <div className="row between">
-        <h1 className="page-title">
-          {lead.name || (lead.username ? `@${lead.username}` : 'Unknown lead')}{' '}
-          <StatusBadge status={lead.status} />
-        </h1>
+      <p><Link to="/leads"><ArrowLeft size={14} style={{ verticalAlign: -2 }} /> Mijozlar</Link></p>
+      <div className="row between" style={{ marginBottom: 18, flexWrap: 'wrap', gap: 12 }}>
+        <div className="page-head" style={{ marginBottom: 0 }}>
+          <IconChip icon={User2} tone="amber" size={42} />
+          <div>
+            <h1 className="page-title">
+              {lead.name || (lead.username ? `@${lead.username}` : "Noma'lum mijoz")}
+            </h1>
+            <StatusBadge status={lead.status} />
+          </div>
+        </div>
         <select
           value={lead.status}
           onChange={(e) => patchLead.mutate({ status: e.target.value })}
-          style={{ width: 170 }}
+          style={{ width: 190 }}
         >
-          {['NEW', 'OPEN', 'QUALIFIED', 'CONVERTED', 'LOST', 'SPAM'].map((s) => (
+          {STATUS_OPTIONS.map((s) => (
             <option key={s} value={s}>{s}</option>
           ))}
         </select>
@@ -75,62 +92,64 @@ export default function LeadDetail() {
       <div className="grid cols-2">
         <div>
           <div className="card">
-            <h3>Profile</h3>
-            <table className="table">
-              <tbody>
-                <tr><td className="muted">Source</td><td>{lead.source}</td></tr>
-                <tr><td className="muted">Phone</td><td>{lead.phone ?? '—'}</td></tr>
-                <tr><td className="muted">Email</td><td>{lead.email ?? '—'}</td></tr>
-                <tr><td className="muted">Language</td><td>{lead.language ?? '—'}</td></tr>
-                <tr><td className="muted">Intent</td><td>{lead.intent ?? '—'}</td></tr>
-                <tr><td className="muted">Score</td><td>{lead.score}</td></tr>
-                <tr>
-                  <td className="muted">Tags</td>
-                  <td>{lead.tags.map((t) => <span key={t} className="badge" style={{ marginRight: 4 }}>{t}</span>)}</td>
-                </tr>
-                <tr>
-                  <td className="muted">Identities</td>
-                  <td>
-                    {lead.identities?.map((i) => (
-                      <div key={i.id} className="mono" style={{ fontSize: 12 }}>
-                        {i.channel}: {i.username ? `@${i.username} ` : ''}({i.externalId})
-                      </div>
-                    ))}
-                  </td>
-                </tr>
-                <tr>
-                  <td className="muted">Qualification</td>
-                  <td>
-                    {Object.entries(lead.qualification ?? {}).length === 0
-                      ? '—'
-                      : Object.entries(lead.qualification).map(([k, v]) => (
-                          <div key={k}><span className="muted">{k}:</span> {String(v)}</div>
-                        ))}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+            <h3><IconChip icon={User2} tone="blue" size={26} /> Profil</h3>
+            <div className="table-scroll">
+              <table className="table">
+                <tbody>
+                  <tr><td className="muted">Manba</td><td>{lead.source === 'INSTAGRAM' ? 'Instagram' : 'Telegram'}</td></tr>
+                  <tr><td className="muted">Telefon</td><td>{lead.phone ?? '—'}</td></tr>
+                  <tr><td className="muted">Email</td><td>{lead.email ?? '—'}</td></tr>
+                  <tr><td className="muted">Til</td><td>{lead.language ?? '—'}</td></tr>
+                  <tr><td className="muted">Maqsad</td><td>{lead.intent ?? '—'}</td></tr>
+                  <tr><td className="muted">Ball</td><td>{lead.score}</td></tr>
+                  <tr>
+                    <td className="muted">Teglar</td>
+                    <td>{lead.tags.map((t) => <span key={t} className="badge" style={{ marginRight: 4 }}>{t}</span>)}</td>
+                  </tr>
+                  <tr>
+                    <td className="muted">Identifikatorlar</td>
+                    <td>
+                      {lead.identities?.map((i) => (
+                        <div key={i.id} className="mono" style={{ fontSize: 12 }}>
+                          {i.channel === 'INSTAGRAM' ? 'Instagram' : 'Telegram'}: {i.username ? `@${i.username} ` : ''}({i.externalId})
+                        </div>
+                      ))}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="muted">Malakalashtirish ma'lumotlari</td>
+                    <td>
+                      {Object.entries(lead.qualification ?? {}).length === 0
+                        ? '—'
+                        : Object.entries(lead.qualification).map(([k, v]) => (
+                            <div key={k}><span className="muted">{QUALIFICATION_LABEL[k] ?? k}:</span> {String(v)}</div>
+                          ))}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
 
           {candidates.data && candidates.data.candidates.length > 0 && (
             <div className="card">
-              <h3>Possible duplicates</h3>
+              <h3><IconChip icon={Copy} tone="violet" size={26} /> Ehtimoliy takrorlanishlar</h3>
               <p className="muted" style={{ fontSize: 12 }}>
-                Same phone/email/username. Merging moves all conversations and notes into this lead.
+                Telefon/email/username bir xil. Birlashtirish barcha suhbat va eslatmalarni shu mijozga ko'chiradi.
               </p>
               {candidates.data.candidates.map((c) => (
                 <div className="row between" key={c.id} style={{ padding: '6px 0' }}>
                   <span>
                     <Link to={`/leads/${c.id}`}>{c.name || c.username || c.id}</Link>{' '}
-                    <span className="muted">({c.source})</span>
+                    <span className="muted">({c.source === 'INSTAGRAM' ? 'Instagram' : 'Telegram'})</span>
                   </span>
                   <button
                     className="small"
                     onClick={() => {
-                      if (confirm('Merge this duplicate into the current lead?')) merge.mutate(c.id);
+                      if (confirm('Bu takrorlanishni joriy mijozga birlashtirasizmi?')) merge.mutate(c.id);
                     }}
                   >
-                    Merge into this lead
+                    Shu mijozga birlashtirish
                   </button>
                 </div>
               ))}
@@ -138,19 +157,20 @@ export default function LeadDetail() {
           )}
 
           <div className="card">
-            <h3>Notes</h3>
+            <h3><IconChip icon={StickyNote} tone="amber" size={26} /> Eslatmalar</h3>
             {lead.notes?.map((n) => (
               <div key={n.id} style={{ marginBottom: 10 }}>
                 <div className="muted" style={{ fontSize: 11 }}>
-                  {n.authorType} · {new Date(n.createdAt).toLocaleString()}
+                  {n.authorType === 'AGENT' ? 'AI' : n.authorType === 'OPERATOR' ? 'Operator' : 'Tizim'} ·{' '}
+                  {new Date(n.createdAt).toLocaleString('uz-UZ')}
                 </div>
                 <div style={{ whiteSpace: 'pre-wrap' }}>{n.content}</div>
               </div>
             ))}
             <div className="row">
-              <input value={note} placeholder="Add a note…" onChange={(e) => setNote(e.target.value)} />
+              <input value={note} placeholder="Eslatma qo'shish…" onChange={(e) => setNote(e.target.value)} />
               <button className="small" disabled={!note.trim() || addNote.isPending} onClick={() => addNote.mutate()}>
-                Add
+                <Send size={13} /> Qo'shish
               </button>
             </div>
           </div>
@@ -158,28 +178,31 @@ export default function LeadDetail() {
 
         <div>
           <div className="card">
-            <h3>Conversations</h3>
+            <h3><IconChip icon={MessageSquare} tone="cyan" size={26} /> Suhbatlar</h3>
             {lead.conversations?.map((c) => (
               <div className="row between" key={c.id} style={{ padding: '6px 0' }}>
                 <span>
-                  {c.channel} · {c.kind.replaceAll('_', ' ').toLowerCase()}{' '}
-                  <span className={`badge ${c.status === 'HANDED_OFF' ? 'warn' : ''}`}>{c.status}</span>
+                  {c.channel === 'INSTAGRAM' ? 'Instagram' : 'Telegram'} · {c.kind.replaceAll('_', ' ').toLowerCase()}{' '}
+                  <span className={`badge ${c.status === 'HANDED_OFF' ? 'warn' : ''}`}>
+                    {c.status === 'ACTIVE' ? 'FAOL' : c.status === 'HANDED_OFF' ? "OPERATORGA O'TKAZILDI" : 'YOPILGAN'}
+                  </span>
                 </span>
-                <button className="small" onClick={() => setConversationId(c.id)}>View</button>
+                <button className="small" onClick={() => setConversationId(c.id)}>Ko'rish</button>
               </div>
             ))}
-            {lead.conversations?.length === 0 && <p className="muted">No conversations yet.</p>}
+            {lead.conversations?.length === 0 && <p className="muted">Hali suhbat yo'q.</p>}
           </div>
 
           {conversationId && (
             <div className="card">
-              <h3>Messages</h3>
+              <h3><IconChip icon={MessageSquare} tone="blue" size={26} /> Xabarlar</h3>
               <div className="chat">
                 {messages.data?.messages.map((m) => (
                   <div key={m.id} className={`msg ${m.direction === 'INBOUND' ? 'in' : 'out'}`}>
                     {m.content}
                     <div className="meta">
-                      {m.role} · {new Date(m.createdAt).toLocaleString()}
+                      {m.role === 'USER' ? 'Mijoz' : m.role === 'AGENT' ? 'AI' : m.role === 'OPERATOR' ? 'Operator' : 'Tizim'} ·{' '}
+                      {new Date(m.createdAt).toLocaleString('uz-UZ')}
                     </div>
                   </div>
                 ))}

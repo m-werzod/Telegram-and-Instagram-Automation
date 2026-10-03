@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
+import { Send, Users, Settings2, Trash2, ChevronDown, Info } from 'lucide-react';
 import {
   api,
   ApiError,
@@ -11,11 +12,12 @@ import {
 } from '../api';
 import { AgentToggle } from './Agents';
 import { HealthBadge } from './Connections';
+import IconChip from '../components/IconChip';
 
 /**
- * The Telegram control center: the bot (its own agent + settings), and every
- * PERSONAL Telegram account connected through the bot — each with independent
- * automation toggle, instructions, and knowledge base.
+ * Telegram boshqaruv markazi: bot (o'z agenti + sozlamalari) va bot orqali
+ * ulangan har bir SHAXSIY Telegram akkaunt — har biri o'z yoqish/o'chirish
+ * tugmasi, ko'rsatmalari va bilimlar bazasi bilan.
  */
 export default function TelegramPage({ isAdmin }: { isAdmin: boolean }) {
   const qc = useQueryClient();
@@ -44,43 +46,49 @@ export default function TelegramPage({ isAdmin }: { isAdmin: boolean }) {
 
   return (
     <>
-      <h1 className="page-title">Telegram</h1>
-      <p className="page-sub">
-        The bot answers its own chats 24/7; personal accounts connected via Telegram Business are
-        automated individually, each with its own instructions and knowledge base.
-      </p>
+      <div className="page-head">
+        <IconChip icon={Send} tone="cyan" size={42} />
+        <div>
+          <h1 className="page-title">Telegram</h1>
+          <p className="page-sub">
+            Bot o'z suhbatlariga 24/7 javob beradi; Telegram Business orqali ulangan shaxsiy akkauntlar
+            alohida-alohida, o'z ko'rsatmalari va bilimlar bazasi bilan boshqariladi.
+          </p>
+        </div>
+      </div>
 
-      {/* ── Bot card ─────────────────────────────────────────────────────── */}
+      {/* ── Bot kartasi ──────────────────────────────────────────────────── */}
       <div className="card">
         <div className="row between">
-          <h3 style={{ margin: 0 }}>Telegram bot {botUsername ? `· @${botUsername}` : ''}</h3>
+          <h3 style={{ margin: 0 }}>
+            <IconChip icon={Send} tone="cyan" size={26} />
+            Telegram bot {botUsername ? `· @${botUsername}` : ''}
+          </h3>
           {telegram && telegram.status === 'connected' ? (
             <HealthBadge status={telegram.healthStatus} />
           ) : (
-            <span className="badge bad">NOT CONNECTED</span>
+            <span className="badge bad">ULANMAGAN</span>
           )}
         </div>
         {telegram?.healthDetail && <p className="muted">{telegram.healthDetail}</p>}
         {!telegram || telegram.status !== 'connected' ? (
           <p className="muted">
-            Connect the bot on the <Link to="/connections">Connections</Link> page (paste the token
-            from @BotFather).
+            Botni <Link to="/connections">Ulanishlar</Link> sahifasida ulang (@BotFather'dan olingan tokenni joylashtiring).
           </p>
         ) : botAgent ? (
           <div className="row between" style={{ marginTop: 8 }}>
             <div>
               <strong>{botAgent.name}</strong>{' '}
               <span className={`badge ${botAgent.enabled ? 'ok' : ''}`}>
-                {botAgent.enabled ? 'ON' : 'OFF'}
+                {botAgent.enabled ? 'YOQILGAN' : "O'CHIRILGAN"}
               </span>
               <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                Model: {botAgent.model} · Language: {botAgent.language} · Knowledge:{' '}
-                {botAgent.knowledgeBase?.name ?? 'none'}
+                Model: {botAgent.model} · Til: {botAgent.language} · Bilim bazasi: {botAgent.knowledgeBase?.name ?? "yo'q"}
               </div>
             </div>
             <div className="row">
               <Link className="btn" to={`/agents/${botAgent.id}`}>
-                Bot settings (instructions, knowledge, image)
+                <Settings2 size={15} /> Bot sozlamalari
               </Link>
               <AgentToggle agent={botAgent} />
             </div>
@@ -88,54 +96,48 @@ export default function TelegramPage({ isAdmin }: { isAdmin: boolean }) {
         ) : null}
       </div>
 
-      {/* ── Personal accounts ────────────────────────────────────────────── */}
+      {/* ── Shaxsiy akkauntlar ───────────────────────────────────────────── */}
       <div className="card">
         <div className="row between">
-          <h3 style={{ margin: 0 }}>Personal accounts (Telegram Business)</h3>
+          <h3 style={{ margin: 0 }}><IconChip icon={Users} tone="violet" size={26} /> Shaxsiy akkauntlar (Telegram Business)</h3>
           {personalAgent && (
             <div className="row">
               <span className="muted" style={{ fontSize: 12 }}>
-                Default agent: {personalAgent.enabled ? 'ON' : 'OFF'}
+                Asosiy agent: {personalAgent.enabled ? 'YOQILGAN' : "O'CHIRILGAN"}
               </span>
-              <Link className="btn" to={`/agents/${personalAgent.id}`}>
-                Default settings
-              </Link>
+              <Link className="btn" to={`/agents/${personalAgent.id}`}>Sozlamalar</Link>
               <AgentToggle agent={personalAgent} />
             </div>
           )}
         </div>
         <p className="muted" style={{ fontSize: 13 }}>
-          Messages arriving in a connected person's own Telegram chats are answered on their
-          behalf. A new account appears here automatically the moment its owner connects the bot —
-          automation stays <strong>OFF</strong> until you enable it below. The default agent switch
-          above must also be ON for any personal account to answer.
+          Ulangan shaxsning o'z Telegram suhbatlariga uning nomidan javob beriladi. Bot ularga ulangan
+          zahoti yangi akkaunt shu yerda avtomatik paydo bo'ladi — pastda yoqilmaguncha avtomatlashtirish{' '}
+          <strong>O'CHIRILGAN</strong> bo'lib turadi. Yuqoridagi asosiy agent tugmasi ham YOQILGAN bo'lishi shart.
         </p>
 
         <details style={{ margin: '10px 0' }}>
-          <summary style={{ cursor: 'pointer' }}>
-            ➕ How to add a user (connect their personal account)
+          <summary className="row" style={{ cursor: 'pointer', gap: 6 }}>
+            <Info size={15} /> Foydalanuvchi qanday qo'shiladi (shaxsiy akkauntni ulash)
           </summary>
-          <ol style={{ lineHeight: 1.8, marginTop: 8 }}>
+          <ol className="steps">
             <li>
-              One-time, for the bot: in Telegram open <span className="mono">@BotFather</span> →{' '}
-              <span className="mono">/mybots</span> → {botUsername ? `@${botUsername}` : 'your bot'}{' '}
-              → Bot Settings → <strong>Business Mode → Turn on</strong>.
+              Bot uchun bir martalik sozlash: Telegramda <span className="mono">@BotFather</span> →{' '}
+              <span className="mono">/mybots</span> → {botUsername ? `@${botUsername}` : 'bot'} →
+              Bot Settings → <strong>Business Mode → Turn on</strong>.
             </li>
             <li>
-              On the user's phone (their own Telegram account): <strong>Settings → Chat
-              Automation</strong> (on Premium/Business accounts: Settings → Telegram Business →
-              Chatbots) → select {botUsername ? `@${botUsername}` : 'the bot'}.
+              Foydalanuvchining telefonida (o'z Telegram akkaunti): <strong>Sozlamalar → Chat avtomatlashtirish</strong>{' '}
+              (Premium/Business akkauntlarda: Sozlamalar → Telegram Business → Chatbotlar) →{' '}
+              {botUsername ? `@${botUsername}` : 'bot'}ni tanlang.
             </li>
-            <li>
-              They choose which chats to share (e.g. exclude contacts) and grant{' '}
-              <strong>“Reply to messages”</strong>.
-            </li>
-            <li>The account appears in the list below — configure it and switch automation ON.</li>
+            <li>Qaysi suhbatlarni ulashishni tanlaydi va <strong>"Xabarlarga javob berish"</strong> ruxsatini beradi.</li>
+            <li>Akkaunt quyidagi ro'yxatda paydo bo'ladi — sozlang va avtomatlashtirishni yoqing.</li>
           </ol>
         </details>
 
         {accounts.data?.accounts.length === 0 && (
-          <p className="muted">No personal accounts connected yet.</p>
+          <p className="muted">Hali hech qanday shaxsiy akkaunt ulanmagan.</p>
         )}
         {accounts.data?.accounts.map((acc) => (
           <PersonalAccountCard
@@ -175,7 +177,7 @@ function PersonalAccountCard({
       setError('');
       onChanged();
     },
-    onError: (err) => setError(err instanceof ApiError ? err.message : 'Update failed'),
+    onError: (err) => setError(err instanceof ApiError ? err.message : 'Yangilashda xatolik'),
   });
   const remove = useMutation({
     mutationFn: () => api.delete(`/api/telegram-personal-accounts/${account.id}`),
@@ -184,56 +186,57 @@ function PersonalAccountCard({
 
   const owner = account.ownerUsername ? `@${account.ownerUsername}` : account.ownerName;
   const telegramSide = !account.isEnabled
-    ? { cls: 'bad', text: 'DISCONNECTED BY OWNER' }
+    ? { cls: 'bad', text: 'EGASI TOMONIDAN UZILGAN' }
     : !account.canReply
-      ? { cls: 'warn', text: 'READ-ONLY (no reply permission)' }
-      : { cls: 'ok', text: 'CONNECTED' };
+      ? { cls: 'warn', text: "FAQAT O'QISH (javob ruxsati yo'q)" }
+      : { cls: 'ok', text: 'ULANGAN' };
 
   return (
-    <div className="card" style={{ background: 'rgba(255,255,255,0.02)' }}>
+    <div className="card" style={{ background: 'rgba(79,107,237,0.025)' }}>
       <div className="row between">
         <div>
           <strong>{account.displayName || owner}</strong>{' '}
           <span className="muted mono" style={{ fontSize: 12 }}>{owner}</span>{' '}
           <span className={`badge ${telegramSide.cls}`}>{telegramSide.text}</span>{' '}
           <span className={`badge ${account.enabled ? 'ok' : ''}`}>
-            {account.enabled ? 'AUTOMATION ON' : 'AUTOMATION OFF'}
+            {account.enabled ? 'AVTOMATLASHTIRISH YOQILGAN' : "AVTOMATLASHTIRISH O'CHIRILGAN"}
           </span>
         </div>
         <div className="row">
           {isAdmin && (
             <button
               className={`toggle ${account.enabled ? 'on' : ''}`}
-              title={account.enabled ? 'Turn automation OFF' : 'Turn automation ON'}
+              title={account.enabled ? "O'chirish" : 'Yoqish'}
               onClick={() => patch.mutate({ enabled: !account.enabled })}
               disabled={patch.isPending}
-              aria-label={`${owner} automation ${account.enabled ? 'on' : 'off'}`}
+              aria-label={`${owner} avtomatlashtirish ${account.enabled ? 'yoqilgan' : "o'chirilgan"}`}
             >
               <span className="knob" />
             </button>
           )}
           <button className="small" onClick={() => setExpanded((v) => !v)}>
-            {expanded ? 'Close' : 'Settings'}
+            <ChevronDown size={14} style={{ transform: expanded ? 'rotate(180deg)' : undefined, transition: 'transform 0.15s' }} />
+            {expanded ? 'Yopish' : 'Sozlamalar'}
           </button>
         </div>
       </div>
       <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-        Connected {new Date(account.connectedAt).toLocaleString()} · Knowledge:{' '}
-        {account.knowledgeBase?.name ?? 'default agent’s'} · Instructions:{' '}
-        {account.instructions?.trim() ? 'custom' : 'default agent’s'}
+        Ulangan: {new Date(account.connectedAt).toLocaleString('uz-UZ')} · Bilim bazasi:{' '}
+        {account.knowledgeBase?.name ?? "asosiy agentniki"} · Ko'rsatmalar:{' '}
+        {account.instructions?.trim() ? 'maxsus' : 'asosiy agentniki'}
       </div>
 
       {expanded && isAdmin && (
         <div style={{ marginTop: 12 }}>
           <div className="grid cols-2">
             <label className="field">
-              <span className="name">Display name (for the CRM and this list)</span>
+              <span className="name">Ko'rinadigan nom (CRM va ro'yxat uchun)</span>
               <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
             </label>
             <label className="field">
-              <span className="name">Knowledge base</span>
+              <span className="name">Bilimlar bazasi</span>
               <select value={kbId} onChange={(e) => setKbId(e.target.value)}>
-                <option value="">Use the default agent's knowledge base</option>
+                <option value="">Asosiy agentning bilim bazasidan foydalanish</option>
                 {knowledgeBases.map((kb) => (
                   <option key={kb.id} value={kb.id}>{kb.name}</option>
                 ))}
@@ -242,13 +245,13 @@ function PersonalAccountCard({
           </div>
           <label className="field">
             <span className="name">
-              Instructions for THIS account (empty = use the default agent's instructions)
+              Shu akkaunt uchun ko'rsatmalar (bo'sh = asosiy agent ko'rsatmalari ishlatiladi)
             </span>
             <textarea
               style={{ minHeight: 160 }}
               value={instructions}
               onChange={(e) => setInstructions(e.target.value)}
-              placeholder="e.g. Siz Alisher akaning yordamchisisiz. Faqat avtomaktab mavzusidagi xabarlarga javob bering…"
+              placeholder="masalan: Siz Alisher akaning yordamchisisiz. Faqat avtomaktab mavzusidagi xabarlarga javob bering…"
             />
           </label>
           {error && <div className="error-text">{error}</div>}
@@ -264,21 +267,21 @@ function PersonalAccountCard({
                 })
               }
             >
-              {patch.isPending ? 'Saving…' : 'Save account settings'}
+              {patch.isPending ? 'Saqlanmoqda…' : 'Akkaunt sozlamalarini saqlash'}
             </button>
             <button
               className="small danger"
               onClick={() => {
                 if (
                   confirm(
-                    `Remove ${owner} from the platform? They should also disconnect the bot in Telegram (Settings → Chat Automation).`,
+                    `${owner}ni platformadan olib tashlaysizmi? Ular Telegramda botni ham uzishlari kerak (Sozlamalar → Chat avtomatlashtirish).`,
                   )
                 ) {
                   remove.mutate();
                 }
               }}
             >
-              Remove
+              <Trash2 size={14} /> Olib tashlash
             </button>
           </div>
         </div>

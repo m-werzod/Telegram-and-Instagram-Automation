@@ -1,12 +1,22 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
+import { Bot, Settings2, Send } from 'lucide-react';
 import { api, type Agent } from '../api';
+import IconChip, { type IconComponent } from '../components/IconChip';
+import InstagramIcon from '../components/InstagramIcon';
 
 const CHANNEL_LABEL: Record<Agent['type'], string> = {
-  INSTAGRAM_COMMENT: 'Instagram · Comments',
-  INSTAGRAM_DM: 'Instagram · Direct messages',
+  INSTAGRAM_COMMENT: 'Instagram · Izohlar',
+  INSTAGRAM_DM: 'Instagram · Direct xabarlar',
   TELEGRAM: 'Telegram · Bot',
-  TELEGRAM_PERSONAL: 'Telegram · Personal account',
+  TELEGRAM_PERSONAL: 'Telegram · Shaxsiy akkaunt',
+};
+
+const CHANNEL_ICON: Record<Agent['type'], IconComponent> = {
+  INSTAGRAM_COMMENT: InstagramIcon,
+  INSTAGRAM_DM: InstagramIcon,
+  TELEGRAM: Send,
+  TELEGRAM_PERSONAL: Send,
 };
 
 export function AgentToggle({ agent }: { agent: Agent }) {
@@ -22,10 +32,10 @@ export function AgentToggle({ agent }: { agent: Agent }) {
   return (
     <button
       className={`toggle ${agent.enabled ? 'on' : ''}`}
-      title={agent.enabled ? 'Turn OFF' : 'Turn ON'}
+      title={agent.enabled ? "O'chirish" : 'Yoqish'}
       onClick={() => toggle.mutate(!agent.enabled)}
       disabled={toggle.isPending}
-      aria-label={`${agent.name} ${agent.enabled ? 'on' : 'off'}`}
+      aria-label={`${agent.name} ${agent.enabled ? 'yoqilgan' : "o'chirilgan"}`}
     >
       <span className="knob" />
     </button>
@@ -40,36 +50,47 @@ export default function Agents() {
 
   return (
     <>
-      <h1 className="page-title">Agents</h1>
-      <p className="page-sub">
-        Each agent runs independently with its own instructions, knowledge base, and ON/OFF state.
-        The state is enforced by the backend: an agent that is OFF never responds, but incoming
-        events are still recorded.
-      </p>
-      {agents.data?.agents.map((a) => (
-        <div className="card" key={a.id}>
-          <div className="row between">
-            <div>
+      <div className="page-head">
+        <IconChip icon={Bot} tone="violet" size={42} />
+        <div>
+          <h1 className="page-title">AI Agentlar</h1>
+          <p className="page-sub">
+            Har bir agent o'z ko'rsatmalari, bilimlar bazasi va YOQILGAN/O'CHIRILGAN holati bilan mustaqil ishlaydi.
+            Holat backend tomonidan nazorat qilinadi: o'chirilgan agent javob bermaydi, lekin kiruvchi xabarlar baribir qayd etiladi.
+          </p>
+        </div>
+      </div>
+      {agents.data?.agents.map((a) => {
+        const ChannelIcon = CHANNEL_ICON[a.type];
+        return (
+          <div className="card" key={a.id}>
+            <div className="row between">
+              <div className="row" style={{ gap: 14, alignItems: 'flex-start' }}>
+                <IconChip icon={ChannelIcon} tone={a.type.startsWith('INSTAGRAM') ? 'pink' : 'cyan'} size={38} />
+                <div>
+                  <div className="row">
+                    <strong>{a.name}</strong>
+                    <span className="badge accent">{CHANNEL_LABEL[a.type]}</span>
+                    <span className={`badge ${a.enabled ? 'ok' : ''}`}>{a.enabled ? 'YOQILGAN' : "O'CHIRILGAN"}</span>
+                  </div>
+                  <div className="muted" style={{ marginTop: 6 }}>
+                    {a.businessObjective || 'Maqsad sozlanmagan'}
+                  </div>
+                  <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                    Model: {a.model} · Til: {a.language} · Bilim bazasi: {a.knowledgeBase?.name ?? "yo'q"}
+                  </div>
+                </div>
+              </div>
               <div className="row">
-                <strong>{a.name}</strong>
-                <span className="badge accent">{CHANNEL_LABEL[a.type]}</span>
-                <span className={`badge ${a.enabled ? 'ok' : ''}`}>{a.enabled ? 'ON' : 'OFF'}</span>
+                <Link className="btn" to={`/agents/${a.id}`}>
+                  <Settings2 size={15} /> Sozlash
+                </Link>
+                <AgentToggle agent={a} />
               </div>
-              <div className="muted" style={{ marginTop: 6 }}>
-                {a.businessObjective || 'No objective configured'}
-              </div>
-              <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                Model: {a.model} · Language: {a.language} · Knowledge:{' '}
-                {a.knowledgeBase?.name ?? 'none'}
-              </div>
-            </div>
-            <div className="row">
-              <Link className="btn" to={`/agents/${a.id}`}>Configure</Link>
-              <AgentToggle agent={a} />
             </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </>
   );
 }

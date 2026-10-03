@@ -1,11 +1,28 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Plug, Send, CheckCircle2, AlertTriangle, XCircle, HelpCircle, RefreshCw } from 'lucide-react';
 import { api, ApiError, type Connection } from '../api';
+import IconChip, { type IconComponent } from '../components/IconChip';
+import InstagramIcon from '../components/InstagramIcon';
+
+const STATUS_LABEL: Record<string, string> = {
+  CONNECTED: 'ULANGAN',
+  DEGRADED: 'BUZILGAN',
+  AUTH_REQUIRED: 'QAYTA ULANISH KERAK',
+  PERMISSION_REQUIRED: "RUXSAT KERAK",
+  WEBHOOK_ERROR: 'WEBHOOK XATOSI',
+  DISCONNECTED: 'ULANMAGAN',
+  UNKNOWN: "NOMA'LUM",
+};
 
 export function HealthBadge({ status }: { status: string }) {
-  const cls =
-    status === 'CONNECTED' ? 'ok' : status === 'DEGRADED' || status === 'UNKNOWN' ? 'warn' : 'bad';
-  return <span className={`badge ${cls}`}>{status.replaceAll('_', ' ')}</span>;
+  const cls = status === 'CONNECTED' ? 'ok' : status === 'DEGRADED' || status === 'UNKNOWN' ? 'warn' : 'bad';
+  const Icon = status === 'CONNECTED' ? CheckCircle2 : status === 'DEGRADED' || status === 'UNKNOWN' ? AlertTriangle : XCircle;
+  return (
+    <span className={`badge ${cls}`}>
+      <Icon size={12} /> {STATUS_LABEL[status] ?? status.replaceAll('_', ' ')}
+    </span>
+  );
 }
 
 export default function Connections({ isAdmin }: { isAdmin: boolean }) {
@@ -21,35 +38,38 @@ export default function Connections({ isAdmin }: { isAdmin: boolean }) {
 
   return (
     <>
-      <h1 className="page-title">Connections</h1>
-      <p className="page-sub">
-        Health is verified against the live APIs — a stored token alone is never shown as
-        "connected". Steps that cannot be automated appear under Manual actions.
-      </p>
+      <div className="page-head">
+        <IconChip icon={Plug} tone="green" size={42} />
+        <div>
+          <h1 className="page-title">Ulanishlar</h1>
+          <p className="page-sub">
+            Holat jonli API orqali tekshiriladi — saqlangan token hali "ulangan" degani emas.
+            Avtomatlashtirib bo'lmaydigan qadamlar "Qo'lda bajariladigan ishlar" bo'limida ko'rsatiladi.
+          </p>
+        </div>
+      </div>
       <ChannelCard
         title="Instagram"
+        icon={InstagramIcon}
+        iconTone="pink"
         channel="instagram"
         connection={instagram}
         isAdmin={isAdmin}
         onChanged={refresh}
         tokenLabel="Instagram access token"
-        tokenHint={
-          'Paste a long-lived Instagram User access token. Fastest path: Meta App Dashboard → Instagram → "API setup with Instagram business login" → Generate token (valid 60 days; the platform refreshes it automatically). Requires scopes: instagram_business_basic, instagram_business_manage_comments, instagram_business_manage_messages.'
-        }
+        tokenHint={'Uzun muddatli Instagram token qo\'ying. Eng tez yo\'l: Meta App Dashboard → Instagram → "API setup with Instagram business login" → Generate token (60 kun amal qiladi; platforma avtomatik yangilaydi).'}
       />
       <ChannelCard
         title="Telegram"
+        icon={Send}
+        iconTone="cyan"
         channel="telegram"
         connection={telegram}
         isAdmin={isAdmin}
         onChanged={refresh}
-        tokenLabel="Bot token"
-        tokenHint="Create a bot with @BotFather in Telegram (/newbot) and paste the token. The platform validates it, configures the webhook, and registers commands automatically."
-        extraActions={
-          telegram && isAdmin ? (
-            <ReconfigureWebhookButton onChanged={refresh} />
-          ) : null
-        }
+        tokenLabel="Bot tokeni"
+        tokenHint="Telegramda @BotFather orqali bot yarating (/newbot) va tokenni shu yerga qo'ying. Platforma uni tekshiradi va webhook/polling'ni avtomatik sozlaydi."
+        extraActions={telegram && isAdmin ? <ReconfigureWebhookButton onChanged={refresh} /> : null}
       />
     </>
   );
@@ -62,13 +82,16 @@ function ReconfigureWebhookButton({ onChanged }: { onChanged: () => void }) {
   });
   return (
     <button className="small" onClick={() => m.mutate()} disabled={m.isPending}>
-      {m.isPending ? 'Configuring…' : 'Reconfigure webhook'}
+      <RefreshCw size={13} className={m.isPending ? 'spin' : ''} />
+      {m.isPending ? 'Sozlanmoqda…' : 'Qayta sozlash'}
     </button>
   );
 }
 
 function ChannelCard(props: {
   title: string;
+  icon: IconComponent;
+  iconTone: 'pink' | 'cyan';
   channel: 'instagram' | 'telegram';
   connection?: Connection;
   isAdmin: boolean;
@@ -77,7 +100,7 @@ function ChannelCard(props: {
   tokenHint: string;
   extraActions?: React.ReactNode;
 }) {
-  const { title, channel, connection, isAdmin, onChanged } = props;
+  const { title, icon: Icon, iconTone, channel, connection, isAdmin, onChanged } = props;
   const [token, setToken] = useState('');
   const [error, setError] = useState('');
 
@@ -90,7 +113,7 @@ function ChannelCard(props: {
       setError('');
       onChanged();
     },
-    onError: (err) => setError(err instanceof ApiError ? err.message : 'Connection failed'),
+    onError: (err) => setError(err instanceof ApiError ? err.message : 'Ulanishda xatolik'),
   });
   const health = useMutation({
     mutationFn: () => api.post(`/api/connections/${channel}/health`),
@@ -104,11 +127,11 @@ function ChannelCard(props: {
   return (
     <div className="card">
       <div className="row between">
-        <h3 style={{ margin: 0 }}>{title}</h3>
+        <h3 style={{ margin: 0 }}><IconChip icon={Icon} tone={iconTone} size={26} /> {title}</h3>
         {connection && connection.status === 'connected' ? (
           <HealthBadge status={connection.healthStatus} />
         ) : (
-          <span className="badge bad">DISCONNECTED</span>
+          <span className="badge bad"><XCircle size={12} /> ULANMAGAN</span>
         )}
       </div>
 
@@ -120,26 +143,27 @@ function ChannelCard(props: {
           </p>
           {connection.healthDetail && <p className="muted">{connection.healthDetail}</p>}
           <p className="muted" style={{ fontSize: 12 }}>
-            Last checked:{' '}
+            Oxirgi tekshiruv:{' '}
             {connection.lastHealthCheckAt
-              ? new Date(connection.lastHealthCheckAt).toLocaleString()
-              : 'never'}
+              ? new Date(connection.lastHealthCheckAt).toLocaleString('uz-UZ')
+              : 'hali tekshirilmagan'}
           </p>
           <div className="row">
             <button className="small" onClick={() => health.mutate()} disabled={health.isPending}>
-              {health.isPending ? 'Checking…' : 'Check health now'}
+              <HelpCircle size={13} />
+              {health.isPending ? 'Tekshirilmoqda…' : 'Hozir tekshirish'}
             </button>
             {props.extraActions}
             {isAdmin && (
               <button
                 className="small danger"
                 onClick={() => {
-                  if (confirm(`Disconnect ${title}? The stored token will be deleted.`)) {
+                  if (confirm(`${title} ulanishini uzasizmi? Saqlangan token o'chiriladi.`)) {
                     disconnect.mutate();
                   }
                 }}
               >
-                Disconnect
+                Uzish
               </button>
             )}
           </div>
@@ -152,7 +176,7 @@ function ChannelCard(props: {
               type="password"
               value={token}
               onChange={(e) => setToken(e.target.value)}
-              placeholder="Paste token — it is encrypted at rest and never displayed again"
+              placeholder="Tokenni joylashtiring — u shifrlangan holda saqlanadi va qayta ko'rsatilmaydi"
             />
             <span className="hint">{props.tokenHint}</span>
           </label>
@@ -162,11 +186,11 @@ function ChannelCard(props: {
             onClick={() => connect.mutate()}
             disabled={connect.isPending || token.length < 10}
           >
-            {connect.isPending ? 'Connecting…' : `Connect ${title}`}
+            {connect.isPending ? 'Ulanmoqda…' : `${title}ni ulash`}
           </button>
         </>
       ) : (
-        <p className="muted">An administrator can connect this channel.</p>
+        <p className="muted">Bu kanalni faqat administrator ulashi mumkin.</p>
       )}
     </div>
   );

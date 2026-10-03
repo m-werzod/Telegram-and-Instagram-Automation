@@ -1,34 +1,36 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Settings as SettingsIcon, KeyRound, Globe2, Wand2, Trash2, Save } from 'lucide-react';
 import { api, ApiError, type SettingsResponse, type SettingStatus } from '../api';
+import IconChip from '../components/IconChip';
 
 const SETTING_META: Record<string, { label: string; hint: string; placeholder: string }> = {
   ANTHROPIC_API_KEY: {
-    label: 'Anthropic API key (Claude)',
-    hint: 'Powers every agent. Get it at https://platform.claude.com → API keys. Paste it here and the agents start answering immediately — no redeploy.',
+    label: 'Anthropic API kaliti (Claude)',
+    hint: "Barcha agentlarni ishlatadi. Uni https://platform.claude.com → API keys sahifasidan oling. Shu yerga joylashtiring — agentlar darhol javob bera boshlaydi, qayta ishga tushirish shart emas.",
     placeholder: 'sk-ant-…',
   },
   META_APP_ID: {
     label: 'Meta App ID',
-    hint: 'From https://developers.facebook.com/apps → your app → App settings → Basic.',
+    hint: 'https://developers.facebook.com/apps → ilovangiz → App settings → Basic sahifasidan.',
     placeholder: '1234567890…',
   },
   META_APP_SECRET: {
     label: 'Meta App secret',
-    hint: 'Same page as the App ID. Used to verify Instagram webhook signatures.',
+    hint: 'App ID bilan bir xil sahifada. Instagram webhook imzosini tekshirish uchun ishlatiladi.',
     placeholder: 'abc123…',
   },
   META_VERIFY_TOKEN: {
     label: 'Meta webhook verify token',
-    hint: 'Any random string YOU choose. Enter the exact same value in the Meta App Dashboard webhook configuration.',
+    hint: "O'zingiz tanlagan istalgan tasodifiy matn. Xuddi shu qiymatni Meta App Dashboard webhook sozlamalariga kiriting.",
     placeholder: 'my-verify-token-…',
   },
 };
 
 function SourceBadge({ source }: { source: SettingStatus['source'] }) {
-  if (source === 'platform') return <span className="badge ok">SET (dashboard)</span>;
-  if (source === 'env') return <span className="badge accent">SET (server env)</span>;
-  return <span className="badge bad">NOT SET</span>;
+  if (source === 'platform') return <span className="badge ok">O'RNATILGAN (dashboard)</span>;
+  if (source === 'env') return <span className="badge accent">O'RNATILGAN (server)</span>;
+  return <span className="badge bad">O'RNATILMAGAN</span>;
 }
 
 export default function Settings() {
@@ -42,41 +44,47 @@ export default function Settings() {
 
   return (
     <>
-      <h1 className="page-title">Settings</h1>
-      <p className="page-sub">
-        Keys are encrypted at rest, never displayed again, and take effect immediately.
-        Dashboard values override the server environment variables.
-      </p>
+      <div className="page-head">
+        <IconChip icon={SettingsIcon} tone="slate" size={42} />
+        <div>
+          <h1 className="page-title">Sozlamalar</h1>
+          <p className="page-sub">
+            Kalitlar shifrlangan holda saqlanadi, qayta ko'rsatilmaydi va darhol kuchga kiradi.
+            Dashboard'dagi qiymat server muhit o'zgaruvchilaridan ustun turadi.
+          </p>
+        </div>
+      </div>
 
       {query.data?.settings.map((s) => (
         <SettingCard key={s.key} setting={s} onChanged={() => qc.invalidateQueries({ queryKey: ['settings'] })} />
       ))}
 
       <div className="card">
-        <h3>Webhook & platform URLs</h3>
+        <h3><IconChip icon={Globe2} tone="blue" size={26} /> Webhook va platforma manzillari</h3>
         {urls?.appUrl ? (
-          <table className="table">
-            <tbody>
-              <tr>
-                <td className="muted">Platform URL</td>
-                <td className="mono">{urls.appUrl}</td>
-              </tr>
-              <tr>
-                <td className="muted">Instagram webhook callback URL</td>
-                <td className="mono">{urls.instagramWebhook}</td>
-              </tr>
-            </tbody>
-          </table>
+          <div className="table-scroll">
+            <table className="table">
+              <tbody>
+                <tr>
+                  <td className="muted">Platforma manzili</td>
+                  <td className="mono">{urls.appUrl}</td>
+                </tr>
+                <tr>
+                  <td className="muted">Instagram webhook manzili</td>
+                  <td className="mono">{urls.instagramWebhook}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         ) : (
           <p className="muted">
-            APP_URL is not configured on the server — webhook URLs cannot be shown. Set APP_URL in
-            the deployment environment.
+            Server tomonida APP_URL sozlanmagan — webhook manzillarini ko'rsatib bo'lmaydi.
           </p>
         )}
         <p className="muted" style={{ fontSize: 12 }}>
-          Use the callback URL + verify token in the Meta App Dashboard (Instagram → Configure
-          webhooks → subscribe to <span className="mono">comments</span> and{' '}
-          <span className="mono">messages</span>). The exact steps are listed under Manual actions.
+          Callback manzili va verify token'ni Meta App Dashboard'da ishlating (Instagram → Configure
+          webhooks → <span className="mono">comments</span> va <span className="mono">messages</span>ga obuna bo'ling).
+          Aniq qadamlar "Qo'lda bajariladigan ishlar" bo'limida.
         </p>
       </div>
     </>
@@ -95,7 +103,7 @@ function SettingCard({ setting, onChanged }: { setting: SettingStatus; onChanged
       setError('');
       onChanged();
     },
-    onError: (err) => setError(err instanceof ApiError ? err.message : 'Save failed'),
+    onError: (err) => setError(err instanceof ApiError ? err.message : 'Saqlab bo\'lmadi'),
   });
   const clear = useMutation({
     mutationFn: () => api.delete(`/api/settings/${setting.key}`),
@@ -105,11 +113,11 @@ function SettingCard({ setting, onChanged }: { setting: SettingStatus; onChanged
   return (
     <div className="card">
       <div className="row between">
-        <h3 style={{ margin: 0 }}>{meta.label}</h3>
+        <h3 style={{ margin: 0 }}><IconChip icon={KeyRound} tone="amber" size={26} /> {meta.label}</h3>
         <SourceBadge source={setting.source} />
       </div>
       {setting.maskedValue && (
-        <p className="muted mono" style={{ margin: '8px 0 0' }}>Current: {setting.maskedValue}</p>
+        <p className="muted mono" style={{ margin: '8px 0 0' }}>Hozirgi: {setting.maskedValue}</p>
       )}
       <label className="field" style={{ marginTop: 10 }}>
         <div className="row">
@@ -132,7 +140,7 @@ function SettingCard({ setting, onChanged }: { setting: SettingStatus; onChanged
                 )
               }
             >
-              Generate
+              <Wand2 size={13} /> Yaratish
             </button>
           )}
         </div>
@@ -145,19 +153,20 @@ function SettingCard({ setting, onChanged }: { setting: SettingStatus; onChanged
           disabled={!value.trim() || save.isPending}
           onClick={() => save.mutate()}
         >
-          {save.isPending ? 'Saving…' : 'Save'}
+          <Save size={15} />
+          {save.isPending ? 'Saqlanmoqda…' : 'Saqlash'}
         </button>
         {setting.source === 'platform' && (
           <button
             className="small danger"
             disabled={clear.isPending}
             onClick={() => {
-              if (confirm('Remove the dashboard value? The server env value (if any) applies again.')) {
+              if (confirm("Dashboard qiymatini o'chirasizmi? Server muhit qiymati (agar bo'lsa) qo'llaniladi.")) {
                 clear.mutate();
               }
             }}
           >
-            Remove
+            <Trash2 size={13} /> O'chirish
           </button>
         )}
       </div>

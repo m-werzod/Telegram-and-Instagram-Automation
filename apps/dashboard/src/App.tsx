@@ -1,6 +1,10 @@
+import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
+import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { MessageCircle, LogOut, Menu, X, MoreHorizontal } from 'lucide-react';
 import { api, ApiError, type SessionUser } from './api';
+import { NAV_ITEMS, type NavItem } from './nav';
+import IconChip from './components/IconChip';
 import Login from './pages/Login';
 import Overview from './pages/Overview';
 import Agents from './pages/Agents';
@@ -16,6 +20,18 @@ import Logs from './pages/Logs';
 import Handoffs from './pages/Handoffs';
 import ManualActions from './pages/ManualActions';
 
+function initials(name: string): string {
+  return (
+    name
+      .trim()
+      .split(/\s+/)
+      .map((p) => p[0])
+      .slice(0, 2)
+      .join('')
+      .toUpperCase() || '?'
+  );
+}
+
 export default function App() {
   const qc = useQueryClient();
   const me = useQuery<{ user: SessionUser } | null>({
@@ -30,9 +46,16 @@ export default function App() {
     },
   });
 
-  if (me.isLoading) return <div className="login-wrap muted">Loading…</div>;
+  if (me.isLoading) {
+    return (
+      <div className="login-page">
+        <p style={{ color: '#aeb8c4' }}>Yuklanmoqda…</p>
+      </div>
+    );
+  }
   if (!me.data) return <Login onLoggedIn={() => qc.invalidateQueries({ queryKey: ['me'] })} />;
   const user = me.data.user;
+  const isAdmin = user.role === 'ADMIN';
 
   const logout = async () => {
     await api.post('/api/auth/logout');
@@ -40,28 +63,99 @@ export default function App() {
     qc.invalidateQueries({ queryKey: ['me'] });
   };
 
+  const items = NAV_ITEMS.filter((n) => !n.adminOnly || isAdmin);
+  const bottomItems = items.filter((n) => n.inBottomBar);
+
+  return <Shell user={user} items={items} bottomItems={bottomItems} onLogout={logout} />;
+}
+
+function Shell({
+  user,
+  items,
+  bottomItems,
+  onLogout,
+}: {
+  user: SessionUser;
+  items: NavItem[];
+  bottomItems: NavItem[];
+  onLogout: () => void;
+}) {
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const location = useLocation();
+  const closeDrawer = () => setDrawerOpen(false);
+
   return (
     <div className="layout">
+      {/* ── Desktop sidebar ──────────────────────────────────────────── */}
       <nav className="sidebar">
-        <div className="brand">AI Automation</div>
-        <NavLink to="/" end>Overview</NavLink>
-        <NavLink to="/agents">Agents</NavLink>
-        <NavLink to="/connections">Connections</NavLink>
-        <NavLink to="/telegram">Telegram</NavLink>
-        <NavLink to="/leads">CRM · Leads</NavLink>
-        <NavLink to="/handoffs">Handoffs</NavLink>
-        <NavLink to="/knowledge">Knowledge</NavLink>
-        <NavLink to="/media">Media · Images</NavLink>
-        {user.role === 'ADMIN' && <NavLink to="/settings">Settings</NavLink>}
-        <NavLink to="/logs">Logs</NavLink>
-        <NavLink to="/manual-actions">Manual actions</NavLink>
-        <div className="spacer" />
+        <div className="brand">
+          <span className="logo"><MessageCircle size={18} /></span>
+          Turon AI Platforma
+        </div>
+        <div className="nav-list">
+          {items.map((n) => (
+            <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
+              <IconChip icon={n.icon} tone={n.tone} size={26} className="icon-chip" />
+              {n.label}
+            </NavLink>
+          ))}
+        </div>
         <div className="user">
-          {user.username} · {user.role}
-          <br />
-          <button className="small" onClick={logout}>Sign out</button>
+          <span className="avatar">{initials(user.name || user.username)}</span>
+          <span className="who">
+            <div className="name">{user.username}</div>
+            <div className="role">{user.role === 'ADMIN' ? 'Administrator' : 'Operator'}</div>
+          </span>
+          <button className="logout-btn" onClick={onLogout} title="Chiqish" aria-label="Chiqish">
+            <LogOut size={17} />
+          </button>
         </div>
       </nav>
+
+      {/* ── Mobile top bar ───────────────────────────────────────────── */}
+      <div className="topbar">
+        <button className="menu-btn" onClick={() => setDrawerOpen(true)} aria-label="Menyu">
+          <Menu size={21} />
+        </button>
+        <div className="brand">
+          <span className="logo"><MessageCircle size={15} /></span>
+          Turon AI
+        </div>
+        <span className="avatar">{initials(user.name || user.username)}</span>
+      </div>
+
+      {/* ── Mobile nav drawer ────────────────────────────────────────── */}
+      <div className={`drawer-backdrop${drawerOpen ? ' open' : ''}`} onClick={closeDrawer} />
+      <nav className={`nav-drawer${drawerOpen ? ' open' : ''}`}>
+        <div className="drawer-head">
+          <div className="brand">
+            <span className="logo"><MessageCircle size={18} /></span>
+            Turon AI
+          </div>
+          <button className="close-btn" onClick={closeDrawer} aria-label="Yopish">
+            <X size={20} />
+          </button>
+        </div>
+        <div className="nav-list" onClick={closeDrawer}>
+          {items.map((n) => (
+            <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
+              <IconChip icon={n.icon} tone={n.tone} size={26} />
+              {n.label}
+            </NavLink>
+          ))}
+        </div>
+        <div className="user">
+          <span className="avatar">{initials(user.name || user.username)}</span>
+          <span className="who">
+            <div className="name">{user.username}</div>
+            <div className="role">{user.role === 'ADMIN' ? 'Administrator' : 'Operator'}</div>
+          </span>
+          <button className="logout-btn" onClick={onLogout} title="Chiqish" aria-label="Chiqish">
+            <LogOut size={17} />
+          </button>
+        </div>
+      </nav>
+
       <main className="main">
         <Routes>
           <Route path="/" element={<Overview />} />
@@ -80,6 +174,23 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
+
+      {/* ── Mobile bottom tab bar ────────────────────────────────────── */}
+      <nav className="bottombar">
+        {bottomItems.map((n) => {
+          const active = n.end ? location.pathname === n.to : location.pathname.startsWith(n.to);
+          return (
+            <NavLink key={n.to} to={n.to} end={n.end} className={active ? 'active' : ''}>
+              <span className="tab-icon"><n.icon size={21} strokeWidth={2.25} /></span>
+              {n.label.split(' ')[0]}
+            </NavLink>
+          );
+        })}
+        <button className={drawerOpen ? 'active' : ''} onClick={() => setDrawerOpen(true)}>
+          <span className="tab-icon"><MoreHorizontal size={21} strokeWidth={2.25} /></span>
+          Ko'proq
+        </button>
+      </nav>
     </div>
   );
 }

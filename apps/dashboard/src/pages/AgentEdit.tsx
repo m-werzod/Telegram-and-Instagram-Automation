@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
+import { ArrowLeft, Settings2, ShieldCheck, ImageIcon, CheckCircle2 } from 'lucide-react';
 import { api, ApiError, type Agent, type KnowledgeBase, type MediaAsset } from '../api';
+import IconChip from '../components/IconChip';
 
 interface Settings {
   bannedPhrases: string[];
@@ -70,56 +72,61 @@ export default function AgentEdit() {
       qc.invalidateQueries({ queryKey: ['agents'] });
       qc.invalidateQueries({ queryKey: ['agent', id] });
     },
-    onError: (err) => setError(err instanceof ApiError ? err.message : 'Save failed'),
+    onError: (err) => setError(err instanceof ApiError ? err.message : 'Saqlab bo\'lmadi'),
   });
 
-  if (!form) return <p className="muted">Loading…</p>;
+  if (!form) return <p className="muted">Yuklanmoqda…</p>;
   const set = (patch: Partial<Agent>) => setForm({ ...form, ...patch });
 
   return (
     <>
-      <p><Link to="/agents">← Agents</Link></p>
-      <h1 className="page-title">{form.name}</h1>
-      <p className="page-sub">
-        Instructions and objectives are stored in the database and applied on the next message —
-        no code changes or restarts required.
-      </p>
+      <p><Link to="/agents"><ArrowLeft size={14} style={{ verticalAlign: -2 }} /> Agentlar</Link></p>
+      <div className="page-head">
+        <IconChip icon={Settings2} tone="violet" size={42} />
+        <div>
+          <h1 className="page-title">{form.name}</h1>
+          <p className="page-sub">
+            Ko'rsatmalar va maqsadlar bazaga saqlanadi va keyingi xabardan boshlab qo'llaniladi —
+            kod o'zgartirish yoki qayta ishga tushirish shart emas.
+          </p>
+        </div>
+      </div>
 
       <div className="card">
         <div className="grid cols-2">
           <label className="field">
-            <span className="name">Agent name</span>
+            <span className="name">Agent nomi</span>
             <input value={form.name ?? ''} onChange={(e) => set({ name: e.target.value })} />
           </label>
           <label className="field">
-            <span className="name">AI model</span>
+            <span className="name">AI modeli</span>
             <select value={form.model} onChange={(e) => set({ model: e.target.value })}>
-              <option value="claude-opus-5">claude-opus-5 (recommended)</option>
-              <option value="claude-sonnet-5">claude-sonnet-5</option>
-              <option value="claude-haiku-4-5">claude-haiku-4-5</option>
+              <option value="claude-sonnet-5">claude-sonnet-5 (tavsiya etiladi)</option>
+              <option value="claude-opus-5">claude-opus-5 (eng kuchli, qimmatroq)</option>
+              <option value="claude-haiku-4-5">claude-haiku-4-5 (eng tez va arzon)</option>
             </select>
           </label>
           <label className="field">
-            <span className="name">Tone</span>
+            <span className="name">Ohang (uslub)</span>
             <input value={form.tone ?? ''} onChange={(e) => set({ tone: e.target.value })} />
-            <span className="hint">e.g. "friendly, professional", "casual and playful"</span>
+            <span className="hint">masalan: "samimiy, professional", "erkin va quvnoq"</span>
           </label>
           <label className="field">
-            <span className="name">Language</span>
+            <span className="name">Til</span>
             <select value={form.language} onChange={(e) => set({ language: e.target.value })}>
-              <option value="auto">Auto-detect (respond in the user's language)</option>
-              <option value="uz">Uzbek</option>
-              <option value="ru">Russian</option>
-              <option value="en">English</option>
+              <option value="auto">Avtomatik aniqlash (foydalanuvchi tilida javob beradi)</option>
+              <option value="uz">O'zbek tili</option>
+              <option value="ru">Rus tili</option>
+              <option value="en">Ingliz tili</option>
             </select>
           </label>
           <label className="field">
-            <span className="name">Knowledge base</span>
+            <span className="name">Bilimlar bazasi</span>
             <select
               value={form.knowledgeBaseId ?? ''}
               onChange={(e) => set({ knowledgeBaseId: e.target.value || null })}
             >
-              <option value="">None</option>
+              <option value="">Yo'q</option>
               {kbQuery.data?.knowledgeBases.map((kb) => (
                 <option key={kb.id} value={kb.id}>{kb.name}</option>
               ))}
@@ -128,33 +135,33 @@ export default function AgentEdit() {
         </div>
 
         <label className="field">
-          <span className="name">Business objective</span>
+          <span className="name">Biznes maqsadi</span>
           <input
             value={form.businessObjective ?? ''}
             onChange={(e) => set({ businessObjective: e.target.value })}
           />
-          <span className="hint">What this agent is trying to achieve (qualify leads, book appointments, support…)</span>
+          <span className="hint">Bu agent nimaga erishishga harakat qiladi (mijozlarni jalb qilish, savollarga javob berish…)</span>
         </label>
 
         <label className="field">
-          <span className="name">System instructions</span>
+          <span className="name">Tizim ko'rsatmalari</span>
           <textarea
             style={{ minHeight: 220 }}
             value={form.systemInstructions ?? ''}
             onChange={(e) => set({ systemInstructions: e.target.value })}
           />
           <span className="hint">
-            Brand identity, allowed/prohibited responses, qualification questions, escalation rules.
-            Platform security rules are always applied on top of these.
+            Brend ovozi, ruxsat etilgan/taqiqlangan javoblar, malakalashtirish savollari, eskalatsiya qoidalari.
+            Platformaning xavfsizlik qoidalari har doim bulardan ustun turadi.
           </span>
         </label>
       </div>
 
       <div className="card">
-        <h3>Guardrails & escalation</h3>
+        <h3><IconChip icon={ShieldCheck} tone="amber" size={26} /> Himoya va eskalatsiya</h3>
         <div className="grid cols-2">
           <label className="field">
-            <span className="name">Max autonomous replies per conversation per hour</span>
+            <span className="name">Soatiga maksimal avtomatik javoblar (har bir suhbat uchun)</span>
             <input
               type="number" min={1} max={200}
               value={settings.maxRepliesPerHour}
@@ -162,7 +169,7 @@ export default function AgentEdit() {
             />
           </label>
           <label className="field">
-            <span className="name">Banned phrases (one per line — replies containing them are blocked & escalated)</span>
+            <span className="name">Taqiqlangan so'zlar (har bir qatorda bittadan — bular bo'lsa javob yuborilmaydi)</span>
             <textarea
               value={settings.bannedPhrases.join('\n')}
               onChange={(e) =>
@@ -172,22 +179,22 @@ export default function AgentEdit() {
           </label>
         </div>
         <div className="row" style={{ gap: 24 }}>
-          <label className="row" style={{ gap: 6 }}>
+          <label className="row" style={{ gap: 8 }}>
             <input
-              type="checkbox" style={{ width: 'auto' }}
+              type="checkbox" style={{ width: 'auto', minHeight: 'unset' }}
               checked={settings.pauseOnEscalation}
               onChange={(e) => setSettings({ ...settings, pauseOnEscalation: e.target.checked })}
             />
-            Pause agent in a conversation after escalation
+            Eskalatsiyadan keyin agentni shu suhbatda to'xtatish
           </label>
           {form.type === 'INSTAGRAM_COMMENT' && (
-            <label className="row" style={{ gap: 6 }}>
+            <label className="row" style={{ gap: 8 }}>
               <input
-                type="checkbox" style={{ width: 'auto' }}
+                type="checkbox" style={{ width: 'auto', minHeight: 'unset' }}
                 checked={settings.publicReplyOnPrivate}
                 onChange={(e) => setSettings({ ...settings, publicReplyOnPrivate: e.target.checked })}
               />
-              Also reply publicly when a DM (private reply) is sent
+              DM (shaxsiy xabar) yuborilganda ochiq izohda ham javob berish
             </label>
           )}
         </div>
@@ -195,21 +202,21 @@ export default function AgentEdit() {
 
       {form.type === 'TELEGRAM' && (
         <div className="card">
-          <h3>Welcome image (/start)</h3>
+          <h3><IconChip icon={ImageIcon} tone="pink" size={26} /> Xush kelibsiz rasmi (/start)</h3>
           <p className="muted" style={{ fontSize: 13 }}>
-            Sent as a photo when someone opens the bot with /start — e.g. the school's banner or
-            price list. Upload images on the Media page.
+            Kimdir botni /start bilan ochganda rasm sifatida yuboriladi — masalan maktab bannerini yoki narxlar jadvalini qo'ying.
+            Rasmlarni Media sahifasida yuklang.
           </p>
           <div className="grid cols-2">
             <label className="field">
-              <span className="name">Image</span>
+              <span className="name">Rasm</span>
               <select
                 value={settings.welcomeImageMediaId ?? ''}
                 onChange={(e) =>
                   setSettings({ ...settings, welcomeImageMediaId: e.target.value || null })
                 }
               >
-                <option value="">None</option>
+                <option value="">Yo'q</option>
                 {mediaQuery.data?.assets.map((a) => (
                   <option key={a.id} value={a.id}>{a.name}</option>
                 ))}
@@ -218,7 +225,7 @@ export default function AgentEdit() {
             {settings.welcomeImageMediaId && (
               <img
                 src={`/files/media/${settings.welcomeImageMediaId}`}
-                alt="Welcome"
+                alt="Xush kelibsiz"
                 style={{ maxHeight: 120, borderRadius: 8, alignSelf: 'end' }}
               />
             )}
@@ -227,9 +234,9 @@ export default function AgentEdit() {
       )}
 
       {error && <div className="error-text">{error}</div>}
-      {saved && <div className="success-text">Saved ✓</div>}
+      {saved && <div className="success-text"><CheckCircle2 size={15} /> Saqlandi</div>}
       <button className="primary" onClick={() => save.mutate()} disabled={save.isPending}>
-        {save.isPending ? 'Saving…' : 'Save changes'}
+        {save.isPending ? 'Saqlanmoqda…' : "O'zgarishlarni saqlash"}
       </button>
     </>
   );

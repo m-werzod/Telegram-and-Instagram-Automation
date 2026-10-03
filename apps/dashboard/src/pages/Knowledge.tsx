@@ -1,6 +1,15 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { BookOpen, Plus, FileText, Link2, Type, RefreshCw, Trash2, Search, FilePlus } from 'lucide-react';
 import { api, ApiError, type KnowledgeBase, type KnowledgeDocument } from '../api';
+import IconChip from '../components/IconChip';
+
+const STATUS_LABEL: Record<string, string> = {
+  PENDING: 'KUTILMOQDA',
+  PROCESSING: 'QAYTA ISHLANMOQDA',
+  READY: 'TAYYOR',
+  FAILED: 'XATOLIK',
+};
 
 export default function Knowledge() {
   const qc = useQueryClient();
@@ -22,28 +31,33 @@ export default function Knowledge() {
 
   return (
     <>
-      <h1 className="page-title">Knowledge</h1>
-      <p className="page-sub">
-        Documents are parsed, chunked, embedded, and retrieved semantically per agent. Agents never
-        receive the whole knowledge base — only the most relevant excerpts.
-      </p>
+      <div className="page-head">
+        <IconChip icon={BookOpen} tone="green" size={42} />
+        <div>
+          <h1 className="page-title">Bilimlar bazasi</h1>
+          <p className="page-sub">
+            Hujjatlar tahlil qilinadi, bo'laklarga bo'linadi va har bir agent uchun eng mos qismlari
+            qidirib topiladi. Agentlar hech qachon butun bazani ko'rmaydi — faqat eng tegishli qismlarni.
+          </p>
+        </div>
+      </div>
 
       <div className="card row">
         <select value={kbId ?? ''} onChange={(e) => setSelected(e.target.value)} style={{ width: 280 }}>
           {bases.data?.knowledgeBases.map((kb) => (
             <option key={kb.id} value={kb.id}>
-              {kb.name} ({kb._count?.documents ?? 0} docs, {kb._count?.chunks ?? 0} chunks)
+              {kb.name} ({kb._count?.documents ?? 0} hujjat, {kb._count?.chunks ?? 0} bo'lak)
             </option>
           ))}
         </select>
         <input
-          placeholder="New knowledge base name…"
+          placeholder="Yangi bilimlar bazasi nomi…"
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
           style={{ width: 240 }}
         />
         <button className="small" disabled={!newName.trim() || createKb.isPending} onClick={() => createKb.mutate()}>
-          Create
+          <Plus size={14} /> Yaratish
         </button>
       </div>
 
@@ -75,7 +89,7 @@ function Documents({ kbId }: { kbId: string }) {
   const uploadJson = useMutation({
     mutationFn: (body: Record<string, unknown>) => api.post(`/api/knowledge-bases/${kbId}/documents`, body),
     onSuccess: () => { setUrl(''); setText(''); setTitle(''); setError(''); refresh(); },
-    onError: (err) => setError(err instanceof ApiError ? err.message : 'Upload failed'),
+    onError: (err) => setError(err instanceof ApiError ? err.message : 'Yuklashda xatolik'),
   });
   const uploadFile = useMutation({
     mutationFn: (file: File) => {
@@ -84,7 +98,7 @@ function Documents({ kbId }: { kbId: string }) {
       return api.postForm(`/api/knowledge-bases/${kbId}/documents`, form);
     },
     onSuccess: () => { setError(''); refresh(); },
-    onError: (err) => setError(err instanceof ApiError ? err.message : 'Upload failed'),
+    onError: (err) => setError(err instanceof ApiError ? err.message : 'Yuklashda xatolik'),
   });
   const del = useMutation({
     mutationFn: (docId: string) => api.delete(`/api/documents/${docId}`),
@@ -98,11 +112,17 @@ function Documents({ kbId }: { kbId: string }) {
   return (
     <>
       <div className="card">
-        <h3>Add document</h3>
+        <h3><IconChip icon={FilePlus} tone="green" size={26} /> Hujjat qo'shish</h3>
         <div className="tabs">
-          <button className={tab === 'file' ? 'active' : ''} onClick={() => setTab('file')}>File (PDF, DOCX, TXT, MD)</button>
-          <button className={tab === 'url' ? 'active' : ''} onClick={() => setTab('url')}>URL</button>
-          <button className={tab === 'text' ? 'active' : ''} onClick={() => setTab('text')}>Text / FAQ</button>
+          <button className={tab === 'file' ? 'active' : ''} onClick={() => setTab('file')}>
+            <FileText size={14} /> Fayl (PDF, DOCX, TXT, MD)
+          </button>
+          <button className={tab === 'url' ? 'active' : ''} onClick={() => setTab('url')}>
+            <Link2 size={14} /> Havola (URL)
+          </button>
+          <button className={tab === 'text' ? 'active' : ''} onClick={() => setTab('text')}>
+            <Type size={14} /> Matn / FAQ
+          </button>
         </div>
         {tab === 'file' && (
           <input
@@ -117,20 +137,20 @@ function Documents({ kbId }: { kbId: string }) {
         )}
         {tab === 'url' && (
           <div className="row">
-            <input placeholder="https://example.com/pricing" value={url} onChange={(e) => setUrl(e.target.value)} />
+            <input placeholder="https://masalan.uz/narxlar" value={url} onChange={(e) => setUrl(e.target.value)} />
             <button className="small primary" disabled={!url || uploadJson.isPending} onClick={() => uploadJson.mutate({ url })}>
-              Fetch & ingest
+              Yuklab olish va qo'shish
             </button>
           </div>
         )}
         {tab === 'text' && (
           <>
             <label className="field">
-              <span className="name">Title</span>
-              <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Price list, FAQ" />
+              <span className="name">Sarlavha</span>
+              <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="masalan: Narxlar ro'yxati, FAQ" />
             </label>
             <textarea
-              placeholder={'Paste business information, FAQs (Q:/A: pairs), product details…'}
+              placeholder={"Biznes ma'lumotlari, FAQ (Savol:/Javob: juftliklari), mahsulot tafsilotlarini joylashtiring…"}
               value={text}
               onChange={(e) => setText(e.target.value)}
             />
@@ -139,7 +159,7 @@ function Documents({ kbId }: { kbId: string }) {
               disabled={!text.trim() || uploadJson.isPending}
               onClick={() => uploadJson.mutate({ text, title: title || undefined })}
             >
-              Ingest text
+              Matnni qo'shish
             </button>
           </>
         )}
@@ -147,36 +167,40 @@ function Documents({ kbId }: { kbId: string }) {
       </div>
 
       <div className="card">
-        <h3>Documents</h3>
-        <table className="table">
-          <thead>
-            <tr><th>Title</th><th>Type</th><th>Status</th><th>Chunks</th><th></th></tr>
-          </thead>
-          <tbody>
-            {docs.data?.documents.map((d) => (
-              <tr key={d.id}>
-                <td>{d.title}</td>
-                <td className="muted">{d.sourceType}</td>
-                <td>
-                  <span className={`badge ${d.status === 'READY' ? 'ok' : d.status === 'FAILED' ? 'bad' : 'warn'}`}>
-                    {d.status}
-                  </span>
-                  {d.error && <div className="error-text" style={{ fontSize: 12 }}>{d.error}</div>}
-                </td>
-                <td>{d._count?.chunks ?? 0}</td>
-                <td className="row">
-                  <button className="small" onClick={() => reingest.mutate(d.id)}>Re-ingest</button>
-                  <button className="small danger" onClick={() => { if (confirm('Delete this document?')) del.mutate(d.id); }}>
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {docs.data?.documents.length === 0 && (
-              <tr><td colSpan={5} className="muted">No documents yet.</td></tr>
-            )}
-          </tbody>
-        </table>
+        <h3><IconChip icon={FileText} tone="slate" size={26} /> Hujjatlar</h3>
+        <div className="table-scroll">
+          <table className="table">
+            <thead>
+              <tr><th>Sarlavha</th><th>Turi</th><th>Holat</th><th>Bo'laklar</th><th></th></tr>
+            </thead>
+            <tbody>
+              {docs.data?.documents.map((d) => (
+                <tr key={d.id}>
+                  <td>{d.title}</td>
+                  <td className="muted">{d.sourceType}</td>
+                  <td>
+                    <span className={`badge ${d.status === 'READY' ? 'ok' : d.status === 'FAILED' ? 'bad' : 'warn'}`}>
+                      {STATUS_LABEL[d.status] ?? d.status}
+                    </span>
+                    {d.error && <div className="error-text" style={{ fontSize: 12 }}>{d.error}</div>}
+                  </td>
+                  <td>{d._count?.chunks ?? 0}</td>
+                  <td className="row">
+                    <button className="small" onClick={() => reingest.mutate(d.id)}>
+                      <RefreshCw size={13} /> Qayta ishlash
+                    </button>
+                    <button className="small danger" onClick={() => { if (confirm("Bu hujjatni o'chirasizmi?")) del.mutate(d.id); }}>
+                      <Trash2 size={13} /> O'chirish
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {docs.data?.documents.length === 0 && (
+                <tr><td colSpan={5} className="muted">Hali hujjat yo'q.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </>
   );
@@ -196,23 +220,23 @@ function SearchTest({ kbId }: { kbId: string }) {
 
   return (
     <div className="card">
-      <h3>Retrieval test</h3>
+      <h3><IconChip icon={Search} tone="violet" size={26} /> Qidiruvni sinash</h3>
       <p className="muted" style={{ fontSize: 12 }}>
-        Test what the agent would retrieve for a customer question.
+        Mijoz savol bersa, agent qaysi ma'lumotlarni topishini shu yerda sinab ko'ring.
       </p>
       <div className="row">
-        <input placeholder="e.g. How much does delivery cost?" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <input placeholder="masalan: Yetkazib berish qancha turadi?" value={query} onChange={(e) => setQuery(e.target.value)} />
         <button className="small primary" disabled={!query.trim() || search.isPending} onClick={() => search.mutate()}>
-          {search.isPending ? 'Searching…' : 'Search'}
+          {search.isPending ? 'Qidirilmoqda…' : 'Qidirish'}
         </button>
       </div>
       {results && (
         <div style={{ marginTop: 12 }}>
-          {results.length === 0 && <p className="muted">No relevant chunks found.</p>}
+          {results.length === 0 && <p className="muted">Mos bo'lak topilmadi.</p>}
           {results.map((r, i) => (
             <div key={i} style={{ marginBottom: 10 }}>
               <div className="muted" style={{ fontSize: 12 }}>
-                {r.documentTitle} · score {r.score.toFixed(3)}
+                {r.documentTitle} · aniqlik {r.score.toFixed(3)}
               </div>
               <div style={{ whiteSpace: 'pre-wrap', fontSize: 13 }}>{r.content.slice(0, 400)}{r.content.length > 400 ? '…' : ''}</div>
             </div>
