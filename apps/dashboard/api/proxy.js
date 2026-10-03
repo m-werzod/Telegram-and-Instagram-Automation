@@ -8,6 +8,12 @@
 // since we know exactly which server that certificate belongs to. Remove
 // this file (and restore a plain `rewrites` entry in vercel.json) once the
 // backend has a publicly-trusted certificate.
+//
+// Fixed (non-dynamic) function path on purpose: Vercel's generic/"Other"
+// framework function routing does not reliably match a `[...path]`
+// filesystem catch-all beyond one path segment. vercel.json instead rewrites
+// every /api/:path* request to /api/proxy?path=:path*, carrying the full
+// sub-path as a query parameter that this function reassembles.
 import { Agent, fetch as undiciFetch } from 'undici';
 
 export const config = {
@@ -28,6 +34,15 @@ export default async function handler(req, res) {
   for await (const chunk of req) chunks.push(chunk);
   const body = chunks.length ? Buffer.concat(chunks) : undefined;
 
+  // req.url here is the REWRITTEN url: /api/proxy?path=auth%2Flogin&foo=bar.
+  // Rebuild the real backend path from the `path` param and pass every other
+  // query param straight through unchanged.
+  const incoming = new URL(req.url, 'http://internal');
+  const subPath = incoming.searchParams.get('path') ?? '';
+  incoming.searchParams.delete('path');
+  const qs = incoming.searchParams.toString();
+  const targetUrl = `${BACKEND}/api/${subPath}${qs ? `?${qs}` : ''}`;
+
   const headers = { ...req.headers };
   delete headers.host;
   delete headers.connection;
@@ -35,7 +50,7 @@ export default async function handler(req, res) {
 
   let upstream;
   try {
-    upstream = await undiciFetch(BACKEND + req.url, {
+    upstream = await undiciFetch(targetUrl, {
       method: req.method,
       headers,
       body: req.method === 'GET' || req.method === 'HEAD' ? undefined : body,
