@@ -171,7 +171,44 @@ export async function searchKnowledge(
     ORDER BY score DESC
     LIMIT ${limit}
   `;
-  return mapRows(rows.filter((r) => Number(r.score) >= FTS_MIN_SCORE));
+  const matched = mapRows(rows.filter((r) => Number(r.score) >= FTS_MIN_SCORE));
+  if (matched.length > 0) return matched;
+
+  // plainto_tsquery ANDs every word, and the 'simple' config does not stem, so
+  // a natural question ("Toifa B narxi qancha?") matches nothing even when the
+  // answer is in the base. Retry on any-term match before giving up.
+  const anyTerm = buildAnyTermQuery(trimmed);
+  if (!anyTerm) return [];
+  const orRows = await prisma.$queryRaw<
+    Array<{ id: string; documentId: string; content: string; metadata: unknown; score: number }>
+  >`
+    SELECT c.id, c."documentId", c.content, c.metadata,
+           ts_rank(c.tsv, to_tsquery('simple', ${anyTerm})) AS score
+    FROM "KnowledgeChunk" c
+    WHERE c."knowledgeBaseId" = ${knowledgeBaseId}
+      AND c."tenantId" = ${tenantId}
+      AND c.tsv @@ to_tsquery('simple', ${anyTerm})
+    ORDER BY score DESC
+    LIMIT ${limit}
+  `;
+  return mapRows(orRows.filter((r) => Number(r.score) >= FTS_MIN_SCORE));
+}
+
+/**
+ * Turn free text into an OR'd `to_tsquery` expression, e.g.
+ * "Toifa B narxi qancha?" → `toifa:* | narxi:* | qancha:*`.
+ *
+ * Every tsquery operator character is stripped rather than escaped: the terms
+ * come from end-user questions and must never reach to_tsquery as syntax.
+ * Returns '' when nothing usable is left, so the caller can skip the query.
+ */
+export function buildAnyTermQuery(text: string): string {
+  const terms = text
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((t) => t.length >= 3)
+    .slice(0, 12);
+  return [...new Set(terms)].map((t) => `${t}:*`).join(' | ');
 }
 
 function mapRows(

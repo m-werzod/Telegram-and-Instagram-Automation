@@ -260,7 +260,12 @@ function BotBrandingCard({
       api.patch(`/api/agents/${botAgent?.id}`, {
         settings: { ...agentSettings, welcomeImageMediaId: mediaId || null },
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['agents'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['agents'] });
+      // The agent editor reads a separate key; without this it would keep
+      // showing the old image and write it back on its next save.
+      qc.invalidateQueries({ queryKey: ['agent', botAgent?.id] });
+    },
   });
 
   return (

@@ -47,14 +47,16 @@ export default function AgentEdit() {
 
   useEffect(() => {
     const a = agentQuery.data?.agent;
-    // Keyed on the id, not on `!form`: this component is reused across
-    // /agents/:id changes, and loading only once would leave the previous
-    // agent's text in a form that saves to the new agent's id.
-    if (a && a.id !== form?.id) {
+    // Re-sync on id *or* updatedAt: the component is reused across
+    // /agents/:id changes (loading once would save one agent's text onto
+    // another), and the record can also change underneath us — e.g. the
+    // welcome image set from the Telegram page — which must not be written
+    // back stale by the next save here.
+    if (a && (a.id !== form?.id || a.updatedAt !== form?.updatedAt)) {
       setForm(a);
       setSettings({ ...DEFAULT_SETTINGS, ...(a.settings as Partial<Settings>) });
     }
-  }, [agentQuery.data, form?.id]);
+  }, [agentQuery.data, form?.id, form?.updatedAt]);
 
   const save = useMutation({
     mutationFn: () =>
