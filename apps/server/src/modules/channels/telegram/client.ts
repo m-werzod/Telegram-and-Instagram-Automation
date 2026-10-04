@@ -238,6 +238,11 @@ export class TelegramClient {
     return this.call<boolean>('setMyCommands', { commands });
   }
 
+  /** Display name shown at the top of the chat (≤64 chars). */
+  setMyName(name: string): Promise<boolean> {
+    return this.call<boolean>('setMyName', { name: name.slice(0, 64) });
+  }
+
   /** Bot description shown on the empty chat screen (≤512 chars). */
   setMyDescription(description: string): Promise<boolean> {
     return this.call<boolean>('setMyDescription', { description: description.slice(0, 512) });

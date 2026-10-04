@@ -1,10 +1,13 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
-import { MessageCircle, LogOut, Menu, X, MoreHorizontal } from 'lucide-react';
+import { LogOut, Menu, X, MoreHorizontal } from 'lucide-react';
 import { api, ApiError, type SessionUser } from './api';
 import { NAV_ITEMS, type NavItem } from './nav';
 import IconChip from './components/IconChip';
+import BrandLogo from './components/BrandLogo';
+import SplashScreen from './components/SplashScreen';
+import ErrorBoundary from './components/ErrorBoundary';
 import Login from './pages/Login';
 import Overview from './pages/Overview';
 import Agents from './pages/Agents';
@@ -34,6 +37,7 @@ function initials(name: string): string {
 
 export default function App() {
   const qc = useQueryClient();
+  const [splash, setSplash] = useState(false);
   const me = useQuery<{ user: SessionUser } | null>({
     queryKey: ['me'],
     queryFn: async () => {
@@ -53,20 +57,54 @@ export default function App() {
       </div>
     );
   }
-  if (!me.data) return <Login onLoggedIn={() => qc.invalidateQueries({ queryKey: ['me'] })} />;
+  if (me.isError) {
+    return (
+      <div className="login-page">
+        <div className="card" style={{ maxWidth: 420, textAlign: 'center' }}>
+          <p>Server bilan bog'lanib bo'lmadi.</p>
+          <p className="muted" style={{ fontSize: 13 }}>
+            {me.error instanceof Error ? me.error.message : "Noma'lum xatolik"}
+          </p>
+          <button className="primary" onClick={() => me.refetch()}>
+            Qayta urinish
+          </button>
+        </div>
+      </div>
+    );
+  }
+  if (!me.data?.user) {
+    return (
+      <Login
+        onLoggedIn={() => {
+          setSplash(true);
+          qc.invalidateQueries({ queryKey: ['me'] });
+        }}
+      />
+    );
+  }
   const user = me.data.user;
   const isAdmin = user.role === 'ADMIN';
 
   const logout = async () => {
-    await api.post('/api/auth/logout');
-    qc.clear();
-    qc.invalidateQueries({ queryKey: ['me'] });
+    try {
+      await api.post('/api/auth/logout');
+    } finally {
+      // Clearing the cache drops every page's data, but leaves this observer
+      // holding the old session — refetch it so the login screen comes back.
+      qc.clear();
+      await me.refetch();
+    }
   };
 
   const items = NAV_ITEMS.filter((n) => !n.adminOnly || isAdmin);
   const bottomItems = items.filter((n) => n.inBottomBar);
 
-  return <Shell user={user} items={items} bottomItems={bottomItems} onLogout={logout} />;
+  return (
+    <>
+      {splash && <SplashScreen onDone={() => setSplash(false)} />}
+      <Shell user={user} items={items} bottomItems={bottomItems} onLogout={logout} />
+    </>
+  );
 }
 
 function Shell({
@@ -89,7 +127,7 @@ function Shell({
       {/* ── Desktop sidebar ──────────────────────────────────────────── */}
       <nav className="sidebar">
         <div className="brand">
-          <span className="logo"><MessageCircle size={18} /></span>
+          <BrandLogo size={34} />
           Turon AI Platforma
         </div>
         <div className="nav-list">
@@ -118,7 +156,7 @@ function Shell({
           <Menu size={21} />
         </button>
         <div className="brand">
-          <span className="logo"><MessageCircle size={15} /></span>
+          <BrandLogo size={28} />
           Turon AI
         </div>
         <span className="avatar">{initials(user.name || user.username)}</span>
@@ -129,7 +167,7 @@ function Shell({
       <nav className={`nav-drawer${drawerOpen ? ' open' : ''}`}>
         <div className="drawer-head">
           <div className="brand">
-            <span className="logo"><MessageCircle size={18} /></span>
+            <BrandLogo size={34} />
             Turon AI
           </div>
           <button className="close-btn" onClick={closeDrawer} aria-label="Yopish">
@@ -157,6 +195,9 @@ function Shell({
       </nav>
 
       <main className="main">
+        {/* Keyed by path so a crashing page is isolated to that page and
+            navigating away clears it — the shell and nav stay usable. */}
+        <ErrorBoundary key={location.pathname}>
         <Routes>
           <Route path="/" element={<Overview />} />
           <Route path="/agents" element={<Agents />} />
@@ -173,6 +214,7 @@ function Shell({
           <Route path="/manual-actions" element={<ManualActions />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </ErrorBoundary>
       </main>
 
       {/* ── Mobile bottom tab bar ────────────────────────────────────── */}

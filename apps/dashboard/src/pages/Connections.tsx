@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plug, Send, CheckCircle2, AlertTriangle, XCircle, HelpCircle, RefreshCw } from 'lucide-react';
 import { api, ApiError, type Connection } from '../api';
 import IconChip, { type IconComponent } from '../components/IconChip';
+import QueryError from '../components/QueryError';
 import InstagramIcon from '../components/InstagramIcon';
 
 const STATUS_LABEL: Record<string, string> = {
@@ -33,8 +34,8 @@ export default function Connections({ isAdmin }: { isAdmin: boolean }) {
   });
   const refresh = () => qc.invalidateQueries({ queryKey: ['connections'] });
 
-  const instagram = connections.data?.connections.find((c) => c.channel === 'INSTAGRAM');
-  const telegram = connections.data?.connections.find((c) => c.channel === 'TELEGRAM');
+  const instagram = connections.data?.connections?.find((c) => c.channel === 'INSTAGRAM');
+  const telegram = connections.data?.connections?.find((c) => c.channel === 'TELEGRAM');
 
   return (
     <>
@@ -48,6 +49,7 @@ export default function Connections({ isAdmin }: { isAdmin: boolean }) {
           </p>
         </div>
       </div>
+      <QueryError error={connections.error} onRetry={() => connections.refetch()} />
       <ChannelCard
         title="Instagram"
         icon={InstagramIcon}

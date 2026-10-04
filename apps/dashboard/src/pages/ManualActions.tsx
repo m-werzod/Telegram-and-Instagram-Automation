@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ClipboardList, PartyPopper, ExternalLink, CheckCircle2, EyeOff, RotateCcw } from 'lucide-react';
 import { api, type ManualAction } from '../api';
 import IconChip from '../components/IconChip';
+import QueryError from '../components/QueryError';
 
 export default function ManualActions() {
   const qc = useQueryClient();
@@ -15,8 +16,8 @@ export default function ManualActions() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['manual-actions'] }),
   });
 
-  const pending = q.data?.actions.filter((a) => a.status === 'PENDING') ?? [];
-  const done = q.data?.actions.filter((a) => a.status !== 'PENDING') ?? [];
+  const pending = q.data?.actions?.filter((a) => a.status === 'PENDING') ?? [];
+  const done = q.data?.actions?.filter((a) => a.status !== 'PENDING') ?? [];
 
   return (
     <>
@@ -31,7 +32,8 @@ export default function ManualActions() {
         </div>
       </div>
 
-      {pending.length === 0 && (
+      <QueryError error={q.error} onRetry={() => q.refetch()} />
+      {pending.length === 0 && !q.isError && (
         <div className="card empty-state">
           <IconChip icon={PartyPopper} tone="green" size={52} />
           <p className="muted">Hech narsa kutilmayapti. Hammasi tayyor!</p>

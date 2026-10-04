@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { Users, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import { api, type Lead } from '../api';
 import IconChip from '../components/IconChip';
+import QueryError from '../components/QueryError';
 
 const STATUSES = ['', 'NEW', 'OPEN', 'QUALIFIED', 'CONVERTED', 'LOST', 'SPAM'];
 const STATUS_LABEL: Record<string, string> = {
@@ -55,6 +56,8 @@ export default function Leads() {
           <p className="page-sub">Barcha kanallar bo'yicha jami {total} ta mijoz.</p>
         </div>
       </div>
+
+      <QueryError error={query.error} onRetry={() => query.refetch()} />
 
       <div className="card row">
         <select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} style={{ width: 170 }}>

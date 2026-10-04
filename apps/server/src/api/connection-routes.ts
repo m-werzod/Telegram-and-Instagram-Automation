@@ -8,12 +8,32 @@ import {
   disconnectInstagram,
 } from '../modules/channels/instagram/service.js';
 import {
+  applyTelegramProfile,
   checkTelegramHealth,
   configureTelegramWebhook,
   connectTelegram,
   disconnectTelegram,
+  readTelegramProfile,
+  DEFAULT_BOT_PROFILE,
 } from '../modules/channels/telegram/service.js';
 import { requireAdmin, requireAuth, tenantOf } from './middleware.js';
+
+const botProfileSchema = z.object({
+  name: z.string().trim().min(1).max(64),
+  shortDescription: z.string().trim().max(120),
+  description: z.string().trim().max(512),
+  commands: z
+    .array(
+      z.object({
+        command: z
+          .string()
+          .trim()
+          .regex(/^[a-z0-9_]{1,32}$/, 'A command may only contain a-z, 0-9 and _'),
+        description: z.string().trim().min(1).max(256),
+      }),
+    )
+    .max(100),
+});
 
 /**
  * Channel connections (spec §14–16, §27). Secrets never leave the server:
@@ -57,6 +77,21 @@ export async function connectionRoutes(app: FastifyInstance): Promise<void> {
     return { connection: publicConnection(updated!) };
   });
 
+  /** How the bot presents itself in Telegram — owned by the dashboard. */
+  app.get('/api/connections/telegram/profile', async (req) => {
+    const connection = await telegramConnectionOf(tenantOf(req));
+    return { profile: readTelegramProfile(connection), defaults: DEFAULT_BOT_PROFILE };
+  });
+
+  app.put('/api/connections/telegram/profile', async (req) => {
+    requireAdmin(req);
+    const parsed = botProfileSchema.safeParse(req.body);
+    if (!parsed.success) throw new ValidationError(parsed.error.issues[0]?.message ?? 'Invalid bot profile');
+    const connection = await telegramConnectionOf(tenantOf(req));
+    const { profile, results } = await applyTelegramProfile(connection, parsed.data);
+    return { profile, results };
+  });
+
   app.delete<{ Params: { channel: string } }>('/api/connections/:channel', async (req) => {
     requireAdmin(req);
     const channel = req.params.channel.toUpperCase();
@@ -91,6 +126,16 @@ export async function connectionRoutes(app: FastifyInstance): Promise<void> {
     });
     return { connection: publicConnection(updated) };
   });
+}
+
+async function telegramConnectionOf(tenantId: string) {
+  const connection = await getPrisma().channelConnection.findUnique({
+    where: { tenantId_channel: { tenantId, channel: 'TELEGRAM' } },
+  });
+  if (!connection || connection.status !== 'connected') {
+    throw new NotFoundError('Telegram is not connected');
+  }
+  return connection;
 }
 
 /** Strip secrets before anything leaves the server (spec §17–18). */

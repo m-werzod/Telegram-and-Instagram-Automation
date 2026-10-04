@@ -1,4 +1,4 @@
-import type { ChannelConnection } from '@prisma/client';
+import type { ChannelConnection, Prisma } from '@prisma/client';
 import { getPrisma } from '../../../db/client.js';
 import { getEnv } from '../../../config/env.js';
 import { decryptSecret, encryptSecret, generateToken } from '../../../lib/crypto.js';
@@ -105,15 +105,26 @@ export async function connectTelegram(tenantId: string, botToken: string): Promi
   // 3. Automatic webhook configuration when a public HTTPS URL is available.
   await configureTelegramWebhook(connection.id);
 
-  // 4. Register commands and bot profile texts (best effort, Uzbek-first).
-  try {
-    await client.setMyCommands([
-      { command: 'start', description: "Suhbatni boshlash / Start" },
-      { command: 'yordam', description: "Yordam va ma'lumot" },
-    ]);
-  } catch (err) {
-    log.warn({ err: errorMessage(err) }, 'setMyCommands failed (non-fatal)');
-  }
+  // 4. Apply the bot profile the dashboard owns (Uzbek-first defaults on a
+  //    first connect). Per-field best effort — nothing here can fail connect.
+  await applyTelegramProfile(connection, readTelegramProfile(connection));
+
+  // The Bot API cannot set a bot's own avatar — only @BotFather can.
+  const botHandleForAvatar = me.username ? `@${me.username}` : 'your bot';
+  await upsertManualAction(tenantId, {
+    dedupKey: 'telegram-bot-avatar',
+    platform: 'Telegram',
+    title: "Set the bot's profile photo (logo) in @BotFather",
+    officialUrl: 'https://core.telegram.org/bots/features#botfather',
+    steps: [
+      'The Telegram Bot API has no method for a bot to change its own profile photo, so this one step cannot be automated.',
+      'Open Telegram → @BotFather → /mybots → select ' + botHandleForAvatar + ' → Edit Bot → Edit Botpic.',
+      'Send the Avtomaktab Turon logo as a PHOTO (square, at least 512×512 px). The dashboard serves the same artwork at /logo.png (1024×1024) if you need a copy.',
+      'Everything else about the bot (name, descriptions, command menu) is controlled from the dashboard: Telegram → "Bot brendingi".',
+    ],
+    expectedResult: "The bot's avatar in Telegram shows the Avtomaktab Turon logo.",
+    whatToReturn: 'Nothing — mark this task done once the photo is visible in Telegram.',
+  });
 
   // 5. Personal-account automation (Telegram Business connection): the owner
   //    performs the in-app connection themselves; the platform detects it
@@ -219,6 +230,83 @@ export async function configureTelegramWebhook(connectionId: string): Promise<vo
     await resolveManualAction(connection.tenantId, 'telegram-webhook-https');
   }
   log.info({ webhookUrl, healthy }, 'telegram webhook configured');
+}
+
+/**
+ * How the bot presents itself in Telegram — name, the two description texts
+ * and the command menu. Stored on the connection so the dashboard owns it
+ * instead of the values being frozen into the code at connect time.
+ *
+ * The profile *photo* is deliberately absent: the Bot API has no method for a
+ * bot to set its own avatar, that is @BotFather → /setuserpic only. A manual
+ * action carries those steps.
+ */
+// A type alias, not an interface: Prisma's Json input types require an
+// implicit index signature, which only type aliases get.
+export type TelegramBotProfile = {
+  name: string;
+  shortDescription: string;
+  description: string;
+  commands: Array<{ command: string; description: string }>;
+};
+
+export const DEFAULT_BOT_PROFILE: TelegramBotProfile = {
+  name: 'Turon Avtomaktab',
+  shortDescription: "Turon Avtomaktab — kurslar, narxlar va ro'yxatdan o'tish bo'yicha 24/7 yordam.",
+  description:
+    "Assalomu alaykum! Men Turon Avtomaktabning yordamchisiman 🚗\n" +
+    "Kurslar, toifalar (A, B, BC, C), narxlar, filiallar va hujjatlar bo'yicha savollaringizga javob beraman. " +
+    "Boshlash uchun /start tugmasini bosing.",
+  commands: [
+    { command: 'start', description: 'Suhbatni boshlash / Start' },
+    { command: 'yordam', description: "Yordam va ma'lumot" },
+  ],
+};
+
+export function readTelegramProfile(connection: ChannelConnection): TelegramBotProfile {
+  const stored = (connection.metadata as { profile?: Partial<TelegramBotProfile> } | null)?.profile;
+  return {
+    name: stored?.name ?? DEFAULT_BOT_PROFILE.name,
+    shortDescription: stored?.shortDescription ?? DEFAULT_BOT_PROFILE.shortDescription,
+    description: stored?.description ?? DEFAULT_BOT_PROFILE.description,
+    commands: stored?.commands?.length ? stored.commands : DEFAULT_BOT_PROFILE.commands,
+  };
+}
+
+/**
+ * Pushes the profile to Telegram and stores what was pushed. Each field is
+ * applied independently: Telegram rejects a name change more than twice an
+ * hour, and one rejected field must not block the others.
+ */
+export async function applyTelegramProfile(
+  connection: ChannelConnection,
+  profile: TelegramBotProfile,
+): Promise<{ profile: TelegramBotProfile; results: Array<{ field: string; ok: boolean; error?: string }> }> {
+  const client = getTelegramClient(connection);
+  const log = childLogger({ module: 'telegram', tenantId: connection.tenantId });
+  const results: Array<{ field: string; ok: boolean; error?: string }> = [];
+
+  const apply = async (field: string, fn: () => Promise<unknown>): Promise<void> => {
+    try {
+      await fn();
+      results.push({ field, ok: true });
+    } catch (err) {
+      results.push({ field, ok: false, error: errorMessage(err) });
+      log.warn({ field, err: errorMessage(err) }, 'telegram profile field rejected');
+    }
+  };
+
+  await apply('name', () => client.setMyName(profile.name));
+  await apply('shortDescription', () => client.setMyShortDescription(profile.shortDescription));
+  await apply('description', () => client.setMyDescription(profile.description));
+  await apply('commands', () => client.setMyCommands(profile.commands));
+
+  await getPrisma().channelConnection.update({
+    where: { id: connection.id },
+    data: { metadata: { ...(connection.metadata as object), profile } as Prisma.InputJsonObject },
+  });
+
+  return { profile, results };
 }
 
 export async function disconnectTelegram(tenantId: string): Promise<void> {

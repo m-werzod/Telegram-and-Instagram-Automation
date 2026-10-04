@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { BookOpen, Plus, FileText, Link2, Type, RefreshCw, Trash2, Search, FilePlus } from 'lucide-react';
 import { api, ApiError, type KnowledgeBase, type KnowledgeDocument } from '../api';
 import IconChip from '../components/IconChip';
+import QueryError from '../components/QueryError';
 
 const STATUS_LABEL: Record<string, string> = {
   PENDING: 'KUTILMOQDA',
@@ -18,7 +19,7 @@ export default function Knowledge() {
     queryFn: () => api.get<{ knowledgeBases: KnowledgeBase[] }>('/api/knowledge-bases'),
   });
   const [selected, setSelected] = useState<string | null>(null);
-  const kbId = selected ?? bases.data?.knowledgeBases[0]?.id ?? null;
+  const kbId = selected ?? bases.data?.knowledgeBases?.[0]?.id ?? null;
 
   const [newName, setNewName] = useState('');
   const createKb = useMutation({
@@ -41,6 +42,8 @@ export default function Knowledge() {
           </p>
         </div>
       </div>
+
+      <QueryError error={bases.error} onRetry={() => bases.refetch()} />
 
       <div className="card row">
         <select value={kbId ?? ''} onChange={(e) => setSelected(e.target.value)} style={{ width: 280 }}>
@@ -73,7 +76,7 @@ function Documents({ kbId }: { kbId: string }) {
     queryKey: ['documents', kbId],
     queryFn: () => api.get<{ documents: KnowledgeDocument[] }>(`/api/knowledge-bases/${kbId}/documents`),
     refetchInterval: (q) =>
-      q.state.data?.documents.some((d) => d.status === 'PENDING' || d.status === 'PROCESSING') ? 3000 : false,
+      q.state.data?.documents?.some((d) => d.status === 'PENDING' || d.status === 'PROCESSING') ? 3000 : false,
   });
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['documents', kbId] });

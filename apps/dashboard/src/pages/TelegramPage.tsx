@@ -1,18 +1,32 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { Send, Users, Settings2, Trash2, ChevronDown, Info } from 'lucide-react';
+import {
+  Send,
+  Users,
+  Settings2,
+  Trash2,
+  ChevronDown,
+  Info,
+  Palette,
+  ImageIcon,
+  CheckCircle2,
+  AlertTriangle,
+} from 'lucide-react';
 import {
   api,
   ApiError,
   type Agent,
   type Connection,
   type KnowledgeBase,
+  type MediaAsset,
+  type TelegramBotProfile,
   type TelegramPersonalAccount,
 } from '../api';
 import { AgentToggle } from './Agents';
 import { HealthBadge } from './Connections';
 import IconChip from '../components/IconChip';
+import QueryError from '../components/QueryError';
 
 /**
  * Telegram boshqaruv markazi: bot (o'z agenti + sozlamalari) va bot orqali
@@ -38,9 +52,9 @@ export default function TelegramPage({ isAdmin }: { isAdmin: boolean }) {
     queryFn: () => api.get<{ knowledgeBases: KnowledgeBase[] }>('/api/knowledge-bases'),
   });
 
-  const telegram = connections.data?.connections.find((c) => c.channel === 'TELEGRAM');
-  const botAgent = agents.data?.agents.find((a) => a.type === 'TELEGRAM');
-  const personalAgent = agents.data?.agents.find((a) => a.type === 'TELEGRAM_PERSONAL');
+  const telegram = connections.data?.connections?.find((c) => c.channel === 'TELEGRAM');
+  const botAgent = agents.data?.agents?.find((a) => a.type === 'TELEGRAM');
+  const personalAgent = agents.data?.agents?.find((a) => a.type === 'TELEGRAM_PERSONAL');
   const botUsername = (telegram?.metadata as { botUsername?: string } | undefined)?.botUsername;
   const refreshAccounts = () => qc.invalidateQueries({ queryKey: ['tg-personal'] });
 
@@ -56,6 +70,15 @@ export default function TelegramPage({ isAdmin }: { isAdmin: boolean }) {
           </p>
         </div>
       </div>
+
+      <QueryError
+        error={connections.error ?? agents.error ?? accounts.error}
+        onRetry={() => {
+          connections.refetch();
+          agents.refetch();
+          accounts.refetch();
+        }}
+      />
 
       {/* ── Bot kartasi ──────────────────────────────────────────────────── */}
       <div className="card">
@@ -95,6 +118,10 @@ export default function TelegramPage({ isAdmin }: { isAdmin: boolean }) {
           </div>
         ) : null}
       </div>
+
+      {telegram?.status === 'connected' && (
+        <BotBrandingCard isAdmin={isAdmin} botAgent={botAgent} botUsername={botUsername} />
+      )}
 
       {/* ── Shaxsiy akkauntlar ───────────────────────────────────────────── */}
       <div className="card">
@@ -150,6 +177,213 @@ export default function TelegramPage({ isAdmin }: { isAdmin: boolean }) {
         ))}
       </div>
     </>
+  );
+}
+
+/** `start - Tavsif` lines → the Bot API command list. */
+function parseCommands(text: string): Array<{ command: string; description: string }> {
+  const out: Array<{ command: string; description: string }> = [];
+  for (const line of text.split('\n')) {
+    const m = line.trim().match(/^\/?([A-Za-z0-9_]{1,32})\s*[-—:]\s*(.+)$/);
+    if (m?.[1] && m[2]) out.push({ command: m[1].toLowerCase(), description: m[2].trim() });
+  }
+  return out;
+}
+
+const FIELD_LABEL: Record<string, string> = {
+  name: 'Bot nomi',
+  shortDescription: 'Qisqa tavsif',
+  description: 'Tavsif',
+  commands: 'Buyruqlar',
+};
+
+/**
+ * Bot branding. Name, both description texts and the command menu are pushed
+ * to Telegram from here, so the bot's presentation is owned by the platform
+ * instead of being typed into @BotFather. The avatar is the one thing the Bot
+ * API cannot set — that stays a @BotFather step.
+ */
+function BotBrandingCard({
+  isAdmin,
+  botAgent,
+  botUsername,
+}: {
+  isAdmin: boolean;
+  botAgent?: Agent;
+  botUsername?: string;
+}) {
+  const qc = useQueryClient();
+  const profileQuery = useQuery({
+    queryKey: ['tg-bot-profile'],
+    queryFn: () =>
+      api.get<{ profile: TelegramBotProfile; defaults: TelegramBotProfile }>(
+        '/api/connections/telegram/profile',
+      ),
+  });
+  const media = useQuery({
+    queryKey: ['media'],
+    queryFn: () => api.get<{ assets: MediaAsset[] }>('/api/media'),
+  });
+
+  const [form, setForm] = useState<TelegramBotProfile | null>(null);
+  const [commandsText, setCommandsText] = useState('');
+  const [error, setError] = useState('');
+  const [results, setResults] = useState<Array<{ field: string; ok: boolean; error?: string }>>([]);
+
+  useEffect(() => {
+    const p = profileQuery.data?.profile;
+    if (p && !form) {
+      setForm(p);
+      setCommandsText(p.commands.map((c) => `${c.command} - ${c.description}`).join('\n'));
+    }
+  }, [profileQuery.data, form]);
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.put<{ profile: TelegramBotProfile; results: Array<{ field: string; ok: boolean; error?: string }> }>(
+        '/api/connections/telegram/profile',
+        { ...form, commands: parseCommands(commandsText) },
+      ),
+    onSuccess: (data) => {
+      setError('');
+      setResults(data.results);
+      qc.invalidateQueries({ queryKey: ['tg-bot-profile'] });
+      qc.invalidateQueries({ queryKey: ['connections'] });
+    },
+    onError: (err) => setError(err instanceof ApiError ? err.message : "Saqlab bo'lmadi"),
+  });
+
+  const agentSettings = (botAgent?.settings ?? {}) as Record<string, unknown>;
+  const welcomeImageId = (agentSettings.welcomeImageMediaId as string | null) ?? '';
+  const setWelcomeImage = useMutation({
+    mutationFn: (mediaId: string) =>
+      api.patch(`/api/agents/${botAgent?.id}`, {
+        settings: { ...agentSettings, welcomeImageMediaId: mediaId || null },
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['agents'] }),
+  });
+
+  return (
+    <div className="card">
+      <h3 style={{ marginTop: 0 }}>
+        <IconChip icon={Palette} tone="pink" size={26} /> Bot brendingi
+      </h3>
+      <p className="muted" style={{ fontSize: 13 }}>
+        Bu yerdagi matnlar to'g'ridan-to'g'ri Telegram'ga yoziladi — bot nomi, tavsiflari va buyruqlar
+        menyusi platformadan boshqariladi, @BotFather'ga kirish shart emas.
+      </p>
+
+      <QueryError error={profileQuery.error} onRetry={() => profileQuery.refetch()} />
+
+      {form && (
+        <>
+          <div className="grid cols-2">
+            <label className="field">
+              <span className="name">Bot nomi (≤64 belgi)</span>
+              <input
+                value={form.name}
+                maxLength={64}
+                disabled={!isAdmin}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+              />
+              <span className="hint">Suhbat tepasida ko'rinadigan nom. Telegram nomni soatiga 2 martadan ko'p o'zgartirishga ruxsat bermaydi.</span>
+            </label>
+            <label className="field">
+              <span className="name">Qisqa tavsif (≤120 belgi)</span>
+              <input
+                value={form.shortDescription}
+                maxLength={120}
+                disabled={!isAdmin}
+                onChange={(e) => setForm({ ...form, shortDescription: e.target.value })}
+              />
+              <span className="hint">Bot profilida, nom ostida ko'rinadi.</span>
+            </label>
+          </div>
+
+          <label className="field">
+            <span className="name">Tavsif (≤512 belgi) — bo'sh suhbat ekranida ko'rinadi</span>
+            <textarea
+              rows={3}
+              value={form.description}
+              maxLength={512}
+              disabled={!isAdmin}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+            />
+          </label>
+
+          <label className="field">
+            <span className="name">Buyruqlar menyusi — har bir qatorda bitta: <span className="mono">start - Tavsif</span></span>
+            <textarea
+              rows={3}
+              value={commandsText}
+              disabled={!isAdmin}
+              onChange={(e) => setCommandsText(e.target.value)}
+            />
+            <span className="hint">Telegram'dagi "/" tugmasi ostidagi ro'yxat. Faqat kichik harflar, raqamlar va pastki chiziq.</span>
+          </label>
+
+          {error && <div className="error-text">{error}</div>}
+          {results.length > 0 && (
+            <div className="row" style={{ flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+              {results.map((r) => (
+                <span key={r.field} className={`badge ${r.ok ? 'ok' : 'bad'}`} title={r.error ?? ''}>
+                  {r.ok ? <CheckCircle2 size={12} /> : <AlertTriangle size={12} />}{' '}
+                  {FIELD_LABEL[r.field] ?? r.field}
+                  {r.ok ? '' : ` — ${r.error ?? 'xatolik'}`}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {isAdmin && (
+            <button className="primary" onClick={() => save.mutate()} disabled={save.isPending}>
+              {save.isPending ? 'Yuborilmoqda…' : "Telegram'ga saqlash"}
+            </button>
+          )}
+        </>
+      )}
+
+      <hr style={{ border: 0, borderTop: '1px solid var(--border)', margin: '18px 0 14px' }} />
+
+      <label className="field">
+        <span className="name">Salomlashuv rasmi — mijoz /start bosganda yuboriladi</span>
+        <select
+          value={welcomeImageId}
+          disabled={!isAdmin || !botAgent || setWelcomeImage.isPending}
+          onChange={(e) => setWelcomeImage.mutate(e.target.value)}
+        >
+          <option value="">Rasm yuborilmasin</option>
+          {media.data?.assets?.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name}
+            </option>
+          ))}
+        </select>
+        <span className="hint">
+          Logotipni <Link to="/media">Media · Rasmlar</Link> bo'limiga yuklang, so'ng shu yerda tanlang.
+          {!botAgent && " Avval Telegram agenti yaratilishi kerak."}
+        </span>
+      </label>
+
+      <details>
+        <summary className="row" style={{ cursor: 'pointer', gap: 6 }}>
+          <ImageIcon size={15} /> Bot avatarini (profil rasmini) qo'yish
+        </summary>
+        <p className="muted" style={{ fontSize: 13, marginTop: 8 }}>
+          Telegram Bot API botga o'z avatarini o'zgartirishga ruxsat bermaydi — buni faqat @BotFather
+          qiladi. Bir marta bajariladi:
+        </p>
+        <ol className="steps">
+          <li>Telegramda <span className="mono">@BotFather</span> → <span className="mono">/mybots</span> → {botUsername ? `@${botUsername}` : 'botingiz'}.</li>
+          <li><strong>Edit Bot → Edit Botpic</strong>.</li>
+          <li>Logotipni <strong>rasm (photo)</strong> sifatida yuboring — kvadrat, kamida 512×512 px.</li>
+        </ol>
+        <p className="muted" style={{ fontSize: 13 }}>
+          Logotipning platformadagi nusxasi (1024×1024 PNG):{' '}
+          <a href="/logo.png" target="_blank" rel="noreferrer">/logo.png</a>
+        </p>
+      </details>
+    </div>
   );
 }
 

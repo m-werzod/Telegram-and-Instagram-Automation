@@ -5,6 +5,7 @@ import { api, type Agent, type Connection } from '../api';
 import { AgentToggle } from './Agents';
 import { HealthBadge } from './Connections';
 import IconChip from '../components/IconChip';
+import QueryError from '../components/QueryError';
 
 interface Stats {
   leads: number;
@@ -40,6 +41,15 @@ export default function Overview() {
           <p className="page-sub">So'nggi 24 soatdagi agentlar, kanallar va faollikning jonli ko'rinishi.</p>
         </div>
       </div>
+
+      <QueryError
+        error={stats.error ?? agents.error ?? connections.error}
+        onRetry={() => {
+          stats.refetch();
+          agents.refetch();
+          connections.refetch();
+        }}
+      />
 
       <div className="grid cols-4">
         <div className="card stat">

@@ -20,10 +20,25 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
   });
   if (res.status === 204) return undefined as T;
-  const data = await res.json().catch(() => ({}));
+  const text = await res.text();
+  let data: unknown;
+  let unparseable = false;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      unparseable = true;
+    }
+  }
   if (!res.ok) {
     const err = (data as any)?.error ?? {};
     throw new ApiError(res.status, err.code ?? 'error', err.message ?? `Request failed (${res.status})`);
+  }
+  // A 200 whose body is not JSON means something between us and the API
+  // mangled it (a truncated or proxied-HTML response). Surfacing it as an
+  // error beats handing pages a `{}` they will crash on.
+  if (unparseable) {
+    throw new ApiError(res.status, 'invalid_response', "Serverdan to'liq bo'lmagan javob keldi — qaytadan urinib ko'ring.");
   }
   return data as T;
 }
@@ -165,6 +180,13 @@ export interface SettingsResponse {
     instagramWebhook: string | null;
     mediaBase: string | null;
   };
+}
+
+export interface TelegramBotProfile {
+  name: string;
+  shortDescription: string;
+  description: string;
+  commands: Array<{ command: string; description: string }>;
 }
 
 export interface TelegramPersonalAccount {

@@ -47,11 +47,14 @@ export default function AgentEdit() {
 
   useEffect(() => {
     const a = agentQuery.data?.agent;
-    if (a && !form) {
+    // Keyed on the id, not on `!form`: this component is reused across
+    // /agents/:id changes, and loading only once would leave the previous
+    // agent's text in a form that saves to the new agent's id.
+    if (a && a.id !== form?.id) {
       setForm(a);
       setSettings({ ...DEFAULT_SETTINGS, ...(a.settings as Partial<Settings>) });
     }
-  }, [agentQuery.data, form]);
+  }, [agentQuery.data, form?.id]);
 
   const save = useMutation({
     mutationFn: () =>
@@ -75,6 +78,18 @@ export default function AgentEdit() {
     onError: (err) => setError(err instanceof ApiError ? err.message : 'Saqlab bo\'lmadi'),
   });
 
+  if (agentQuery.isError) {
+    return (
+      <div className="card">
+        <p><Link to="/agents"><ArrowLeft size={14} style={{ verticalAlign: -2 }} /> Agentlar</Link></p>
+        <p>Agentni yuklab bo'lmadi.</p>
+        <p className="muted" style={{ fontSize: 13 }}>
+          {agentQuery.error instanceof Error ? agentQuery.error.message : "Noma'lum xatolik"}
+        </p>
+        <button className="small" onClick={() => agentQuery.refetch()}>Qayta urinish</button>
+      </div>
+    );
+  }
   if (!form) return <p className="muted">Yuklanmoqda…</p>;
   const set = (patch: Partial<Agent>) => setForm({ ...form, ...patch });
 

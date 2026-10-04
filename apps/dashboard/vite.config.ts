@@ -14,7 +14,9 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': 'http://localhost:3000',
+      // DEV_API_TARGET points dev at a non-local backend (e.g. a staging host).
+      '/api': process.env.DEV_API_TARGET ?? 'http://localhost:3000',
+      '/files': process.env.DEV_API_TARGET ?? 'http://localhost:3000',
     },
   },
 });

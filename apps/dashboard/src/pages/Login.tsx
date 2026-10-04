@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { MessageCircle, User, Lock, Eye, EyeOff, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { User, Lock, Eye, EyeOff, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { api, ApiError } from '../api';
+import BrandLogo from '../components/BrandLogo';
 
 export default function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
   const [loginName, setLoginName] = useState('');
@@ -30,9 +31,7 @@ export default function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
 
       <form className={`login-card${error ? ' shake' : ''}`} onSubmit={submit}>
         <div className="login-brand">
-          <div className="login-logo" aria-hidden>
-            <MessageCircle size={26} strokeWidth={2} />
-          </div>
+          <BrandLogo size={72} className="login-mark" />
           <h1>Turon AI Platforma</h1>
           <p>Instagram · Telegram · CRM — boshqaruv panelingizga kiring</p>
         </div>

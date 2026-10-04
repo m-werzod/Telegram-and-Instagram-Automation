@@ -63,6 +63,18 @@ export default function LeadDetail() {
   });
 
   const lead = leadQuery.data?.lead;
+  if (leadQuery.isError || (!lead && !leadQuery.isLoading)) {
+    return (
+      <div className="card">
+        <p><Link to="/leads"><ArrowLeft size={14} style={{ verticalAlign: -2 }} /> Mijozlar</Link></p>
+        <p>Mijoz ma'lumotini yuklab bo'lmadi.</p>
+        <p className="muted" style={{ fontSize: 13 }}>
+          {leadQuery.error instanceof Error ? leadQuery.error.message : 'Mijoz topilmadi'}
+        </p>
+        <button className="small" onClick={() => leadQuery.refetch()}>Qayta urinish</button>
+      </div>
+    );
+  }
   if (!lead) return <p className="muted">Yuklanmoqda…</p>;
 
   return (

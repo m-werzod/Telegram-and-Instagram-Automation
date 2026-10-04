@@ -4,6 +4,7 @@ import { Bot, Settings2, Send } from 'lucide-react';
 import { api, type Agent } from '../api';
 import IconChip, { type IconComponent } from '../components/IconChip';
 import InstagramIcon from '../components/InstagramIcon';
+import QueryError from '../components/QueryError';
 
 const CHANNEL_LABEL: Record<Agent['type'], string> = {
   INSTAGRAM_COMMENT: 'Instagram · Izohlar',
@@ -60,6 +61,7 @@ export default function Agents() {
           </p>
         </div>
       </div>
+      <QueryError error={agents.error} onRetry={() => agents.refetch()} />
       {agents.data?.agents?.map((a) => {
         const ChannelIcon = CHANNEL_ICON[a.type];
         return (
