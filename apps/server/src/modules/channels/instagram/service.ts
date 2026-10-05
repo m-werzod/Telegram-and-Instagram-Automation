@@ -111,7 +111,8 @@ export async function createMetaManualActions(tenantId: string): Promise<void> {
     steps: [
       'Open https://developers.facebook.com/apps/ and select your app (must be a Business type app with the Instagram product added).',
       'In the left menu choose "Instagram" → "API setup with Instagram business login" → section "3. Configure webhooks" (or Products → Webhooks → subscribe to the "Instagram" object).',
-      `Callback URL: enter exactly ${callbackUrl}`,
+      `Callback URL: ${callbackUrl}`,
+      'IMPORTANT — the callback URL must present a publicly-trusted TLS certificate. Meta refuses self-issued ones, so if this server answers on a self-signed certificate (the Connections page says "long-polling" for Telegram for the same reason), use the public HTTPS address the dashboard itself is served from, keeping the /api/webhooks/instagram path.',
       'Verify token: enter exactly the META_VERIFY_TOKEN value shown on the dashboard Settings page (set one there first if it is empty — any random string you choose).',
       'Click "Verify and save" — the platform answers the verification challenge automatically.',
       'Subscribe to the webhook fields: "comments" and "messages".',
