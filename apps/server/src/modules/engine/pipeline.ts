@@ -2,7 +2,7 @@ import type { Agent, Lead, LeadStatus } from '@prisma/client';
 import { getPrisma } from '../../db/client.js';
 import { errorMessage } from '../../lib/errors.js';
 import { childLogger } from '../../lib/logger.js';
-import { resolveAIProvider } from '../ai/index.js';
+import { resolveProviderForModel } from '../ai/index.js';
 import { searchKnowledge, type RetrievedChunk } from '../knowledge/service.js';
 import {
   applyBusinessRules,
@@ -125,17 +125,21 @@ export async function runAgentPipeline(input: PipelineInput): Promise<PipelineOu
     log.warn({ err: errorMessage(err) }, 'media list failed — continuing without images');
   }
 
-  const provider = await resolveAIProvider(input.tenantId, input.agent.provider);
-  if (!provider) {
+  // Provider is derived from the model (the single source of truth), with a
+  // cross-provider fallback so a key configured for the OTHER provider still
+  // keeps the agent answering instead of 401-ing on every message.
+  const resolved = await resolveProviderForModel(input.tenantId, input.agent.model);
+  if (!resolved) {
     return {
       status: 'failed',
       decision: null,
       verdict: null,
       settings,
       escalated: false,
-      error: `AI provider "${input.agent.provider}" is not configured (missing API key)`,
+      error: `No AI API key is configured — add one in Settings before agents can reply`,
     };
   }
+  const { provider } = resolved;
 
   const system = buildSystemPrompt(input.agent, input.tenantName, input.channelKey);
   const messages = buildMessages(history, {
@@ -155,7 +159,7 @@ export async function runAgentPipeline(input: PipelineInput): Promise<PipelineOu
       agentId: input.agent.id,
       conversationId: conversation.id,
       requestId: input.requestId,
-      model: input.agent.model,
+      model: resolved.model,
       status: 'RUNNING',
     },
   });
@@ -167,8 +171,13 @@ export async function runAgentPipeline(input: PipelineInput): Promise<PipelineOu
       messages,
       schema: agentDecisionSchema,
       schemaName: 'agent_decision',
-      model: input.agent.model,
-      maxTokens: 2048,
+      model: resolved.model,
+      // Headroom, not a target: on every current Claude model thinking is on
+      // by default, and those tokens come out of the same budget as the JSON
+      // decision. A cap tight enough to truncate mid-object turns a good reply
+      // into an unparseable response, so leave room — max_tokens is a ceiling,
+      // not a reservation, and costs nothing when unused.
+      maxTokens: 8192,
       // Short conversational replies + a small classification schema don't
       // need the model's deepest reasoning tier (the default) — cuts cost
       // meaningfully with no quality loss for this workload shape, while

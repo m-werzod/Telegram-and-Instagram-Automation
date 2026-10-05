@@ -4,6 +4,7 @@ import { guardStatusTransition, runAgentPipeline } from '../../src/modules/engin
 import { makeTestEnv } from '../helpers/test-env.js';
 import { mockPrisma } from '../helpers/mock-prisma.js';
 import { installStubAI, type StubAIProvider } from '../helpers/stub-ai.js';
+import { setAIForTesting } from '../../src/modules/ai/index.js';
 import { initLogger } from '../../src/lib/logger.js';
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
@@ -123,6 +124,15 @@ describe('runAgentPipeline', () => {
     );
   });
 
+  // Thinking is on by default on every current Claude model and shares this
+  // budget with the JSON decision, so a tight ceiling truncates the object
+  // mid-write and the reply is lost. Pin the headroom.
+  it('asks for enough output budget that a thinking model cannot truncate the decision', async () => {
+    ai.respondWith({ reply: 'ok', intent: 'question' });
+    await runAgentPipeline(baseInput());
+    expect(ai.calls[0]?.maxTokens ?? 0).toBeGreaterThanOrEqual(8192);
+  });
+
   it('spam is silently suppressed', async () => {
     ai.respondWith({ reply: 'should not be sent', isSpamOrIrrelevant: true, intent: 'spam' });
     const outcome = await runAgentPipeline(baseInput());
@@ -176,13 +186,31 @@ describe('runAgentPipeline', () => {
     expect(outcome.escalated).toBe(true);
   });
 
-  it('missing provider fails cleanly without throwing', async () => {
+  it('no AI key configured at all fails cleanly without throwing', async () => {
+    setAIForTesting({ providers: {}, embeddings: null });
+    const outcome = await runAgentPipeline(baseInput());
+    expect(outcome.status).toBe('failed');
+    expect(outcome.error).toContain('No AI API key');
+  });
+
+  // The failure this prevents: an operator buys ONE key, the agents are set to
+  // the other vendor's model, and every inbound message 401s — which from the
+  // customer's side is indistinguishable from the bot being switched off.
+  it('falls back to the provider that HAS a key rather than failing every message', async () => {
     const outcome = await runAgentPipeline({
       ...baseInput(),
-      agent: makeAgent({ provider: 'unknown-provider' }),
+      agent: makeAgent({ model: 'gpt-5', provider: 'openai' }),
     });
-    expect(outcome.status).toBe('failed');
-    expect(outcome.error).toContain('unknown-provider');
+
+    expect(outcome.status).toBe('replied');
+    expect(ai.calls).toHaveLength(1);
+    // Same capability tier on the provider that is actually configured.
+    expect(ai.calls[0]!.model).toBe('claude-opus-5');
+    // The substitution is recorded, never hidden: the execution log shows the
+    // model that really ran.
+    expect(prisma.aIExecution.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ model: 'claude-opus-5' }) }),
+    );
   });
 });
 

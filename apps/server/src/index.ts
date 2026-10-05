@@ -2,7 +2,7 @@ import { loadEnv, setEnvForTesting } from './config/env.js';
 import { disconnectPrisma, getPrisma } from './db/client.js';
 import { errorMessage } from './lib/errors.js';
 import { initLogger } from './lib/logger.js';
-import { initAI } from './modules/ai/index.js';
+import { initAI, repairMisfiledAIKeys, runAIKeyHealthCheck } from './modules/ai/index.js';
 import { pruneOldRecords, recoverStuckEvents } from './modules/webhooks/service.js';
 import { pruneExpiredSessions } from './modules/auth/service.js';
 import { createQueue } from './queue/index.js';
@@ -72,12 +72,22 @@ async function main(): Promise<void> {
     logger.warn({ err: errorMessage(err) }, 'failed to resume telegram polling');
   }
 
-  // Housekeeping: session pruning, connection health checks, stuck-event
-  // recovery (the durable retry backstop), and retention pruning.
+  // Rescue a key saved into the wrong provider's slot, THEN surface a
+  // missing/rejected one — in that order, since the repair decides the answer.
+  // Both run on boot rather than up to a housekeeping interval later: with no
+  // usable key, no agent can reply to anyone.
+  void repairMisfiledAIKeys()
+    .catch((err) => logger.warn({ err: errorMessage(err) }, 'AI key repair failed'))
+    .then(() => runAIKeyHealthCheck())
+    .catch((err) => logger.warn({ err: errorMessage(err) }, 'initial AI key health check failed'));
+
+  // Housekeeping: session pruning, connection health checks, AI key health,
+  // stuck-event recovery (the durable retry backstop), and retention pruning.
   const housekeeping = setInterval(
     () => {
       void pruneExpiredSessions().catch(() => undefined);
       void runHealthChecks().catch(() => undefined);
+      void runAIKeyHealthCheck().catch(() => undefined);
       void recoverStuckEvents().catch(() => undefined);
       void pruneOldRecords().catch(() => undefined);
     },

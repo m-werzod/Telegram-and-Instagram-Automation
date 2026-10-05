@@ -71,21 +71,27 @@ svg { display: block; flex-shrink: 0; }
 .nav-item.active { color: #fff; background: #1a2440; }
 .nav-item.active .icon-chip { box-shadow: 0 0 0 1px rgba(255,255,255,0.08); }
 
-.sidebar .user {
+/* The signed-in user + sign-out control. Shared by the desktop sidebar and the
+   mobile drawer — scoping these to .sidebar left the drawer copy with no
+   layout at all: the avatar, name and role stacked as three bare lines and the
+   sign-out button fell back to the global white button style. */
+.user {
   padding: 12px 18px 16px; font-size: 12px; color: #8a95a3; border-top: 1px solid #1a2236;
   display: flex; align-items: center; gap: 10px;
 }
-.sidebar .user .avatar {
+.user .avatar {
   width: 32px; height: 32px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-dark);
   display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; flex-shrink: 0;
 }
-.sidebar .user .who { flex: 1; min-width: 0; overflow: hidden; }
-.sidebar .user .who .name { color: #e4e8f0; font-weight: 600; font-size: 13px; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
-.sidebar .user .who .role { font-size: 11px; color: #7b8699; }
-.sidebar .user .logout-btn {
-  border: none; background: none; color: #8a95a3; padding: 6px; border-radius: 8px; cursor: pointer; display: flex;
+.user .who { flex: 1; min-width: 0; overflow: hidden; }
+.user .who .name { color: #e4e8f0; font-weight: 600; font-size: 13px; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+.user .who .role { font-size: 11px; color: #7b8699; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+.user .logout-btn {
+  border: none; background: none; color: #8a95a3; padding: 6px; border-radius: 8px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 7px; min-height: unset; flex-shrink: 0;
 }
-.sidebar .user .logout-btn:hover { background: #1a2236; color: #fff; }
+.user .logout-btn:hover { background: #1a2236; color: #fff; border-color: transparent; }
+.user .logout-btn .label { display: none; }
 
 .topbar { display: none; }
 .bottombar { display: none; }
@@ -193,13 +199,23 @@ label.field .hint { color: var(--muted); font-size: 12px; margin-top: 4px; displ
 
 /* ── Toggle switch ──────────────────────────────────────────────────────── */
 .toggle {
-  position: relative; width: 46px; height: 26px; border-radius: 13px; border: none;
+  position: relative; width: 46px; height: 26px; border-radius: 999px; border: none;
   background: #d4d9e1; cursor: pointer; transition: background 0.15s; padding: 0; flex-shrink: 0;
+  /* `button` carries a 38px (42px on mobile) min-height for touch targets.
+     Applied to a switch it wins over `height` and the control renders as a
+     chunky rounded rectangle with the knob stuck to its top edge — so the
+     switch pins its own height at both ends. */
+  min-height: 26px; max-height: 26px;
+  display: inline-block; -webkit-appearance: none; appearance: none;
 }
+.toggle:hover { border-color: transparent; }
 .toggle.on { background: var(--ok); }
+.toggle:disabled { opacity: 0.55; cursor: progress; }
+.toggle:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
 .toggle .knob {
-  position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; border-radius: 50%;
-  background: #fff; transition: left 0.15s; box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+  position: absolute; top: 50%; left: 2px; width: 22px; height: 22px; border-radius: 50%;
+  background: #fff; transform: translateY(-50%); transition: left 0.15s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.25);
 }
 .toggle.on .knob { left: 22px; }
 
@@ -403,7 +419,22 @@ details.json pre { background: #f3f5f8; padding: 10px; border-radius: 8px; overf
   .nav-drawer .brand .logo { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, var(--accent) 0%, var(--violet) 100%); }
   .nav-drawer .close-btn { background: none; border: none; color: #8a95a3; padding: 8px; border-radius: 9px; min-height: unset; }
   .nav-drawer .nav-list { padding: 8px 10px; }
-  .nav-drawer .user { padding: 12px 18px 18px; }
+  .nav-drawer .user {
+    padding: 12px 14px calc(14px + env(safe-area-inset-bottom));
+    gap: 11px;
+  }
+  /* On a phone the sign-out control is the one thing people look for in this
+     drawer — give it a real label and a hit area instead of a bare icon. */
+  .nav-drawer .user .logout-btn {
+    background: #1a2236; color: #e4e8f0; padding: 9px 13px; border-radius: 10px;
+    font-size: 13px; font-weight: 600; min-height: 40px;
+  }
+  .nav-drawer .user .logout-btn .label { display: inline; }
+
+  /* Keep the switch a pill, just a slightly larger one for thumbs. */
+  .toggle { width: 50px; height: 30px; min-height: 30px; max-height: 30px; }
+  .toggle .knob { width: 26px; height: 26px; }
+  .toggle.on .knob { left: 22px; }
 
   .card { padding: 15px 16px; border-radius: var(--radius); }
   /* Stat tiles stay 2-up; content cards get the full width — side-by-side

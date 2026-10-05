@@ -51,7 +51,10 @@ const envSchema = z.object({
   /** Embeddings provider for semantic knowledge retrieval. 'none' falls back to Postgres full-text search. */
   EMBEDDINGS_PROVIDER: z.enum(['voyage', 'openai', 'none']).default('none'),
   VOYAGE_API_KEY: z.string().optional(),
+  /** Also powers the OpenAI (GPT) chat agents, not just embeddings. */
   OPENAI_API_KEY: z.string().optional(),
+  /** Point the OpenAI client at an OpenAI-compatible gateway instead of the official API. */
+  OPENAI_BASE_URL: z.string().url().optional(),
 
   // Meta / Instagram
   META_APP_ID: z.string().optional(),

@@ -12,6 +12,44 @@ import type { AIProvider, GenerateResult, GenerateStructuredParams } from './pro
  * Server-side refusal fallbacks are enabled by default on Claude Opus 5 so a
  * safety-classifier decline re-runs on a fallback model within the same call.
  */
+/**
+ * Result of checking an API key against Anthropic.
+ *
+ * `rejected` means Anthropic itself refused the credential (401/403) — the key
+ * is wrong, revoked, or not an Anthropic key at all. `unknown` means the check
+ * could not be completed (network, 429, 5xx); the key may well be fine, so
+ * callers must not treat it as a failure.
+ */
+export type KeyVerification =
+  | { status: 'valid' }
+  | { status: 'rejected'; detail: string }
+  | { status: 'unknown'; detail: string };
+
+/**
+ * Verify an Anthropic API key without spending a single token: `GET /v1/models`
+ * is free metadata, but still authenticated — so it answers "is this key usable"
+ * exactly, with no inference cost. Used when an operator pastes a key in the
+ * dashboard (reject a bad one immediately instead of letting all four agents
+ * fail at 401 on the next inbound message) and by the periodic health check.
+ */
+export async function verifyAnthropicKey(apiKey: string): Promise<KeyVerification> {
+  const client = new Anthropic({ apiKey, maxRetries: 0, timeout: 15_000 });
+  try {
+    await client.models.list({ limit: 1 });
+    return { status: 'valid' };
+  } catch (err) {
+    if (err instanceof Anthropic.APIError) {
+      // Only 401/403 prove the credential itself is bad. Everything else
+      // (429, 5xx, timeouts) says nothing about the key.
+      if (err.status === 401 || err.status === 403) {
+        return { status: 'rejected', detail: err.message };
+      }
+      return { status: 'unknown', detail: `${err.status ?? 'network'}: ${err.message}` };
+    }
+    return { status: 'unknown', detail: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 export class AnthropicProvider implements AIProvider {
   readonly name = 'anthropic';
   private client: Anthropic;
@@ -65,6 +103,18 @@ export class AnthropicProvider implements AIProvider {
         .filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === 'text')
         .map((b) => b.text)
         .join('');
+
+      // A response cut off at the token ceiling leaves a half-written JSON
+      // object. Say that plainly instead of letting it surface as the much
+      // more confusing "model returned non-JSON output" — and don't retry it,
+      // since the same request under the same cap truncates the same way.
+      if (response.stop_reason === 'max_tokens') {
+        throw new ExternalApiError(
+          'anthropic',
+          `Response hit the ${maxTokens}-token ceiling before the decision was complete — raise maxTokens`,
+          { retryable: false, detail: text.slice(-200) },
+        );
+      }
 
       let parsedJson: unknown;
       try {

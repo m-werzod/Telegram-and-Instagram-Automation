@@ -4,6 +4,7 @@ import { getEnv } from '../../../config/env.js';
 import { decryptSecret, encryptSecret } from '../../../lib/crypto.js';
 import { ValidationError, errorMessage } from '../../../lib/errors.js';
 import { childLogger } from '../../../lib/logger.js';
+import { isPubliclyReachable } from '../shared/reachability.js';
 import { upsertManualAction, resolveManualAction } from '../../manual-actions/service.js';
 import { InstagramClient } from './client.js';
 
@@ -99,9 +100,20 @@ export async function connectInstagram(
 
 export async function createMetaManualActions(tenantId: string): Promise<void> {
   const env = getEnv();
-  const callbackUrl = env.APP_URL
-    ? `${env.APP_URL.replace(/\/$/, '')}/api/webhooks/instagram`
+  const appUrl = env.APP_URL?.replace(/\/$/, '');
+  const callbackUrl = appUrl
+    ? `${appUrl}/api/webhooks/instagram`
     : '<your public HTTPS URL>/api/webhooks/instagram';
+
+  // Unlike Telegram — which quietly degrades to long-polling — Instagram has no
+  // pull mode at all: if Meta cannot POST to this URL, not one comment or DM
+  // ever arrives and nothing anywhere reports an error. So probe the address we
+  // are about to tell the operator to paste into Meta, and lead with the truth
+  // when it does not actually reach this server.
+  const reachable = appUrl ? await isPubliclyReachable(appUrl) : false;
+  const unreachableWarning = appUrl
+    ? `BLOCKER — ${appUrl} does not currently reach this server: a request to ${appUrl}/api/health was answered by something else (or not at all). Meta delivers Instagram events by POST only, so until this address routes here, no comment and no DM can ever arrive, however correctly the rest is configured. This is a hosting/network setting (ports 80/443 routed to this machine, a real domain, or a tunnel), not something the app can fix. Note Meta requires port 443 — a URL with a custom port will not be accepted.`
+    : 'BLOCKER — APP_URL is not set, so there is no address to give Meta. Set APP_URL in .env to the public HTTPS base URL of this server and restart.';
 
   await upsertManualAction(tenantId, {
     dedupKey: 'meta-webhook-config',
@@ -109,6 +121,7 @@ export async function createMetaManualActions(tenantId: string): Promise<void> {
     title: 'Configure Instagram webhooks in the Meta App Dashboard',
     officialUrl: 'https://developers.facebook.com/apps/',
     steps: [
+      ...(reachable ? [] : [unreachableWarning]),
       'Open https://developers.facebook.com/apps/ and select your app (must be a Business type app with the Instagram product added).',
       'In the left menu choose "Instagram" → "API setup with Instagram business login" → section "3. Configure webhooks" (or Products → Webhooks → subscribe to the "Instagram" object).',
       `Callback URL: ${callbackUrl}`,

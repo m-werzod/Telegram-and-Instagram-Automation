@@ -15,6 +15,7 @@ import { ValidationError } from '../../lib/errors.js';
 
 export const SETTING_KEYS = [
   'ANTHROPIC_API_KEY',
+  'OPENAI_API_KEY',
   'META_APP_ID',
   'META_APP_SECRET',
   'META_VERIFY_TOKEN',
@@ -69,6 +70,8 @@ function envFallback(key: SettingKey): string | null {
   switch (key) {
     case 'ANTHROPIC_API_KEY':
       return env.ANTHROPIC_API_KEY ?? null;
+    case 'OPENAI_API_KEY':
+      return env.OPENAI_API_KEY ?? null;
     case 'META_APP_ID':
       return env.META_APP_ID ?? null;
     case 'META_APP_SECRET':

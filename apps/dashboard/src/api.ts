@@ -173,6 +173,23 @@ export interface SettingStatus {
   maskedValue: string;
 }
 
+export type ProviderName = 'anthropic' | 'openai';
+
+/** Live state of an AI key — what POST /api/settings/:key/verify reports. */
+export type AIKeyVerification =
+  | { status: 'missing'; provider: ProviderName }
+  | { status: 'valid'; provider: ProviderName; source: 'platform' | 'env' }
+  | { status: 'rejected'; provider: ProviderName; source: 'platform' | 'env'; detail: string }
+  | { status: 'unknown'; provider: ProviderName; source: 'platform' | 'env'; detail: string };
+
+/** A model an agent can be set to, as served by /api/agents/models. */
+export interface ModelInfo {
+  id: string;
+  provider: ProviderName;
+  inputPerMTok: number;
+  outputPerMTok: number;
+}
+
 export interface SettingsResponse {
   settings: SettingStatus[];
   urls: {

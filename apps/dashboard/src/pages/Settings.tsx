@@ -1,14 +1,25 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Settings as SettingsIcon, KeyRound, Globe2, Wand2, Trash2, Save } from 'lucide-react';
-import { api, ApiError, type SettingsResponse, type SettingStatus } from '../api';
+import { Settings as SettingsIcon, KeyRound, Globe2, Wand2, Trash2, Save, ShieldCheck } from 'lucide-react';
+import {
+  api,
+  ApiError,
+  type AIKeyVerification,
+  type SettingsResponse,
+  type SettingStatus,
+} from '../api';
 import IconChip from '../components/IconChip';
 
 const SETTING_META: Record<string, { label: string; hint: string; placeholder: string }> = {
   ANTHROPIC_API_KEY: {
     label: 'Anthropic API kaliti (Claude)',
-    hint: "Barcha agentlarni ishlatadi. Uni https://platform.claude.com → API keys sahifasidan oling. Shu yerga joylashtiring — agentlar darhol javob bera boshlaydi, qayta ishga tushirish shart emas.",
+    hint: "Claude modellaridagi agentlar uchun. Uni https://platform.claude.com → API keys sahifasidan oling. Shu yerga joylashtiring — agentlar darhol javob bera boshlaydi, qayta ishga tushirish shart emas.",
     placeholder: 'sk-ant-…',
+  },
+  OPENAI_API_KEY: {
+    label: 'OpenAI API kaliti (ChatGPT)',
+    hint: "GPT modellaridagi agentlar uchun. Uni https://platform.openai.com/api-keys sahifasidan oling. Agent sahifasida gpt-5 modelini tanlasangiz, shu kalit ishlatiladi. Bilimlar bazasining semantik qidiruvini ham yoqadi.",
+    placeholder: 'sk-…',
   },
   META_APP_ID: {
     label: 'Meta App ID',
@@ -95,12 +106,37 @@ function SettingCard({ setting, onChanged }: { setting: SettingStatus; onChanged
   const meta = SETTING_META[setting.key] ?? { label: setting.key, hint: '', placeholder: '' };
   const [value, setValue] = useState('');
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const isAIKey = setting.key === 'ANTHROPIC_API_KEY' || setting.key === 'OPENAI_API_KEY';
+  const [verification, setVerification] = useState<AIKeyVerification | null>(null);
+
+  const verify = useMutation({
+    mutationFn: () =>
+      api.post<{ verification: AIKeyVerification }>(`/api/settings/${setting.key}/verify`),
+    onSuccess: (res) => {
+      setError('');
+      setNotice('');
+      setVerification(res.verification);
+    },
+    onError: (err) => setError(err instanceof ApiError ? err.message : 'Tekshirib bolmadi'),
+  });
 
   const save = useMutation({
-    mutationFn: () => api.put(`/api/settings/${setting.key}`, { value }),
-    onSuccess: () => {
+    mutationFn: () =>
+      api.put<{ warning?: string; notice?: string }>(`/api/settings/${setting.key}`, { value }),
+    onSuccess: (res) => {
       setValue('');
       setError('');
+      // `notice` means the key belonged to the OTHER provider and was filed
+      // there instead — the operator has to be told, or the Settings page will
+      // seem to have swallowed what they just pasted. Otherwise: no warning
+      // means the server round-tripped the key to the provider and it was
+      // accepted, so say that rather than a bare "saved".
+      setNotice(
+        [res?.notice, res?.warning].filter(Boolean).join(' ') ||
+          (isAIKey ? 'Kalit tekshirildi va saqlandi — agentlar ishlashga tayyor.' : ''),
+      );
+      setVerification(null);
       onChanged();
     },
     onError: (err) => setError(err instanceof ApiError ? err.message : 'Saqlab bo\'lmadi'),
@@ -147,6 +183,8 @@ function SettingCard({ setting, onChanged }: { setting: SettingStatus; onChanged
         <span className="hint">{meta.hint}</span>
       </label>
       {error && <div className="error-text">{error}</div>}
+      {notice && <p className="muted" style={{ margin: '6px 0 0' }}>{notice}</p>}
+      {verification && <VerificationResult verification={verification} />}
       <div className="row">
         <button
           className="primary"
@@ -156,6 +194,12 @@ function SettingCard({ setting, onChanged }: { setting: SettingStatus; onChanged
           <Save size={15} />
           {save.isPending ? 'Saqlanmoqda…' : 'Saqlash'}
         </button>
+        {isAIKey && setting.source !== 'unset' && (
+          <button className="small" disabled={verify.isPending} onClick={() => verify.mutate()}>
+            <ShieldCheck size={13} />
+            {verify.isPending ? 'Tekshirilmoqda…' : 'Tekshirish'}
+          </button>
+        )}
         {setting.source === 'platform' && (
           <button
             className="small danger"
@@ -171,5 +215,50 @@ function SettingCard({ setting, onChanged }: { setting: SettingStatus; onChanged
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * The AI key's real state as Anthropic reports it. "O'RNATILGAN" alone was the
+ * trap this answers: a key can be stored and still be refused on every single
+ * agent run, which looks identical to "the agents are broken".
+ */
+function VerificationResult({ verification }: { verification: AIKeyVerification }) {
+  const label = verification.provider === 'openai' ? 'OpenAI' : 'Anthropic';
+  const console_ =
+    verification.provider === 'openai'
+      ? 'platform.openai.com/api-keys'
+      : 'platform.claude.com → Settings → API keys';
+  const prefix = verification.provider === 'openai' ? 'sk-…' : 'sk-ant-…';
+  if (verification.status === 'valid') {
+    return (
+      <p className="muted" style={{ margin: '6px 0 0' }}>
+        <span className="badge ok">ISHLAYDI</span> {label} kalitni qabul qildi — agentlar javob
+        bera oladi.
+      </p>
+    );
+  }
+  if (verification.status === 'missing') {
+    return (
+      <p className="muted" style={{ margin: '6px 0 0' }}>
+        <span className="badge bad">YO'Q</span> Kalit o'rnatilmagan — hech bir agent javob bera
+        olmaydi.
+      </p>
+    );
+  }
+  if (verification.status === 'rejected') {
+    return (
+      <div className="error-text">
+        {label} kalitni rad etdi ({verification.detail}). Shu sababli bu provayderdagi agentlar
+        javob bermaydi. {console_} sahifasida yangi kalit (
+        <span className="mono">{prefix}</span>) yarating va shu yerga joylashtiring.
+      </div>
+    );
+  }
+  return (
+    <p className="muted" style={{ margin: '6px 0 0' }}>
+      Hozir tekshirib bo'lmadi ({verification.detail}) — bu kalit yaroqsiz degani emas, keyinroq
+      qayta urinib ko'ring.
+    </p>
   );
 }

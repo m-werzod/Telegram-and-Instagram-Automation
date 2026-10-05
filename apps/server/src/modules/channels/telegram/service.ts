@@ -7,6 +7,7 @@ import { childLogger } from '../../../lib/logger.js';
 import { upsertManualAction, resolveManualAction } from '../../manual-actions/service.js';
 import { TelegramClient } from './client.js';
 import { isPolling, startPolling, stopPolling } from './polling.js';
+import { isPubliclyReachable } from '../shared/reachability.js';
 
 /**
  * Telegram connection lifecycle (spec §14–15): validate token → store encrypted
@@ -22,29 +23,6 @@ export function telegramWebhookPath(connectionId: string): string {
   return `/api/webhooks/telegram/${connectionId}`;
 }
 
-/**
- * Self-probe: does APP_URL actually route back to THIS server from the
- * public internet? A syntactically valid https:// URL is not proof of
- * reachability — NAT, a shared-IP provider gateway (e.g. Traefik routing by
- * registered hostname), or a firewall can all accept the TCP connection and
- * return a plausible-looking response (even a 404) from something that is
- * NOT this application. Hitting our own /api/health and checking its exact,
- * distinctive JSON shape is a cheap, reliable way to tell "reached us" apart
- * from "reached someone else at that IP" — a generic 404 cannot fake it.
- */
-async function isPubliclyReachable(appUrl: string): Promise<boolean> {
-  try {
-    const res = await fetch(`${appUrl.replace(/\/$/, '')}/api/health`, {
-      signal: AbortSignal.timeout(8_000),
-    });
-    if (!res.ok) return false;
-    const body = (await res.json().catch(() => null)) as { status?: string; db?: string } | null;
-    return typeof body?.status === 'string' && typeof body?.db === 'string';
-  } catch {
-    return false;
-  }
-}
-
 export function getTelegramClient(connection: ChannelConnection): TelegramClient {
   const env = getEnv();
   const creds = JSON.parse(decryptSecret(connection.credentialsEncrypted, env.ENCRYPTION_KEY)) as TelegramCredentials;
@@ -54,7 +32,6 @@ export function getTelegramClient(connection: ChannelConnection): TelegramClient
 export async function connectTelegram(tenantId: string, botToken: string): Promise<ChannelConnection> {
   const env = getEnv();
   const prisma = getPrisma();
-  const log = childLogger({ module: 'telegram', tenantId });
 
   const token = botToken.trim();
   if (!/^\d+:[A-Za-z0-9_-]{20,}$/.test(token)) {

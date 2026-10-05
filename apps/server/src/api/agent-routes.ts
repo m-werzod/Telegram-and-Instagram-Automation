@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { getPrisma } from '../db/client.js';
 import { NotFoundError, ValidationError } from '../lib/errors.js';
+import { providerForModel, SUPPORTED_MODELS } from '../modules/ai/index.js';
 import { agentSettingsSchema } from '../modules/engine/business-rules.js';
 import { requireAuth, tenantOf } from './middleware.js';
 
@@ -17,7 +18,7 @@ const agentUpdateSchema = z
     businessObjective: z.string().max(2_000),
     tone: z.string().max(200),
     language: z.string().max(20),
-    provider: z.enum(['anthropic']),
+    provider: z.enum(['anthropic', 'openai']),
     model: z.string().min(1).max(100),
     knowledgeBaseId: z.string().nullable(),
     settings: agentSettingsSchema,
@@ -26,6 +27,9 @@ const agentUpdateSchema = z
 
 export async function agentRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('preHandler', requireAuth);
+
+  /** Models an agent can be set to, with the per-provider price hint. */
+  app.get('/api/agents/models', async () => ({ models: SUPPORTED_MODELS }));
 
   app.get('/api/agents', async (req) => {
     const agents = await getPrisma().agent.findMany({
@@ -62,10 +66,16 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
       if (!kb) throw new ValidationError('Knowledge base not found');
     }
 
+    // The provider is derived from the model, never set independently: one
+    // dropdown in the dashboard picks "gpt-5" or "claude-haiku-4-5" and the
+    // routing follows. A provider/model pair therefore cannot drift apart.
+    const provider = parsed.data.model ? providerForModel(parsed.data.model) : undefined;
+
     const agent = await prisma.agent.update({
       where: { id: existing.id },
       data: {
         ...parsed.data,
+        ...(provider ? { provider } : {}),
         settings: parsed.data.settings ? (parsed.data.settings as object) : undefined,
       },
     });

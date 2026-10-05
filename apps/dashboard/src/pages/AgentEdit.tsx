@@ -2,7 +2,14 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, Settings2, ShieldCheck, ImageIcon, CheckCircle2 } from 'lucide-react';
-import { api, ApiError, type Agent, type KnowledgeBase, type MediaAsset } from '../api';
+import {
+  api,
+  ApiError,
+  type Agent,
+  type KnowledgeBase,
+  type MediaAsset,
+  type ModelInfo,
+} from '../api';
 import IconChip from '../components/IconChip';
 
 interface Settings {
@@ -38,6 +45,11 @@ export default function AgentEdit() {
   const mediaQuery = useQuery({
     queryKey: ['media'],
     queryFn: () => api.get<{ assets: MediaAsset[] }>('/api/media'),
+  });
+  // Served by the backend so the list cannot drift from what it can route.
+  const modelQuery = useQuery({
+    queryKey: ['agent-models'],
+    queryFn: () => api.get<{ models: ModelInfo[] }>('/api/agents/models'),
   });
 
   const [form, setForm] = useState<Partial<Agent> | null>(null);
@@ -118,10 +130,22 @@ export default function AgentEdit() {
           <label className="field">
             <span className="name">AI modeli</span>
             <select value={form.model} onChange={(e) => set({ model: e.target.value })}>
-              <option value="claude-sonnet-5">claude-sonnet-5 (tavsiya etiladi)</option>
-              <option value="claude-opus-5">claude-opus-5 (eng kuchli, qimmatroq)</option>
-              <option value="claude-haiku-4-5">claude-haiku-4-5 (eng tez va arzon)</option>
+              {/* The saved model always has an entry, even if it is no longer
+                  in the catalogue — otherwise the select would silently show a
+                  different model than the one stored. */}
+              {!(modelQuery.data?.models ?? []).some((m) => m.id === form.model) && (
+                <option value={form.model}>{form.model}</option>
+              )}
+              {(modelQuery.data?.models ?? []).map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.id} — ${m.inputPerMTok}/${m.outputPerMTok} 1M token
+                </option>
+              ))}
             </select>
+            <span className="hint">
+              Narx: kiruvchi/chiquvchi 1M token uchun. Model qaysi provayderga tegishli bo'lsa
+              (Claude yoki ChatGPT), o'sha provayderning API kaliti Sozlamalarda bo'lishi kerak.
+            </span>
           </label>
           <label className="field">
             <span className="name">Ohang (uslub)</span>

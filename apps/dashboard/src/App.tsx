@@ -35,6 +35,33 @@ function initials(name: string): string {
   );
 }
 
+/**
+ * Signed-in user + sign-out. One definition for the desktop sidebar and the
+ * mobile drawer so the two can never drift apart again.
+ */
+function UserCard({ user, onLogout }: { user: SessionUser; onLogout: () => void }) {
+  const roleLabel = user.role === 'ADMIN' ? 'Administrator' : 'Operator';
+  const name = user.name?.trim() || user.username;
+  // Two lines, two different facts. The seeded admin is named "Administrator"
+  // and signs in as "Admin", so naively printing name-over-role (or
+  // login-over-name) stacks near-identical words and reads as a glitch — show
+  // the login underneath only when it adds something the name does not.
+  const subtitle = name === user.username ? roleLabel : `@${user.username}`;
+  return (
+    <div className="user">
+      <span className="avatar">{initials(name)}</span>
+      <span className="who">
+        <div className="name">{name}</div>
+        <div className="role">{subtitle}</div>
+      </span>
+      <button className="logout-btn" onClick={onLogout} title="Chiqish" aria-label="Chiqish">
+        <LogOut size={17} />
+        <span className="label">Chiqish</span>
+      </button>
+    </div>
+  );
+}
+
 export default function App() {
   const qc = useQueryClient();
   const [splash, setSplash] = useState(false);
@@ -138,16 +165,7 @@ function Shell({
             </NavLink>
           ))}
         </div>
-        <div className="user">
-          <span className="avatar">{initials(user.name || user.username)}</span>
-          <span className="who">
-            <div className="name">{user.username}</div>
-            <div className="role">{user.role === 'ADMIN' ? 'Administrator' : 'Operator'}</div>
-          </span>
-          <button className="logout-btn" onClick={onLogout} title="Chiqish" aria-label="Chiqish">
-            <LogOut size={17} />
-          </button>
-        </div>
+        <UserCard user={user} onLogout={onLogout} />
       </nav>
 
       {/* ── Mobile top bar ───────────────────────────────────────────── */}
@@ -182,16 +200,7 @@ function Shell({
             </NavLink>
           ))}
         </div>
-        <div className="user">
-          <span className="avatar">{initials(user.name || user.username)}</span>
-          <span className="who">
-            <div className="name">{user.username}</div>
-            <div className="role">{user.role === 'ADMIN' ? 'Administrator' : 'Operator'}</div>
-          </span>
-          <button className="logout-btn" onClick={onLogout} title="Chiqish" aria-label="Chiqish">
-            <LogOut size={17} />
-          </button>
-        </div>
+        <UserCard user={user} onLogout={onLogout} />
       </nav>
 
       <main className="main">
