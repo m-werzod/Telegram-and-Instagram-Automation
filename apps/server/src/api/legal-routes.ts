@@ -18,6 +18,16 @@ import { parseAgentSettings } from '../modules/engine/business-rules.js';
  * page does. The operator still owns it as a legal document.
  */
 export async function legalRoutes(app: FastifyInstance): Promise<void> {
+  // Both spellings of each path. These URLs are typed by hand into a form on
+  // someone else's dashboard, and a trailing slash arriving as a 404 would look
+  // exactly like the page not existing.
+  for (const [canonical, alias] of [
+    ['/privacy', '/privacy/'],
+    ['/data-deletion', '/data-deletion/'],
+  ] as const) {
+    app.get(alias, { config: { rateLimit: false } }, (_req, reply) => reply.redirect(canonical, 301));
+  }
+
   app.get('/privacy', { config: { rateLimit: false } }, async (_req, reply) => {
     const { business, contact } = await businessIdentity();
     return reply.type('text/html; charset=utf-8').send(
