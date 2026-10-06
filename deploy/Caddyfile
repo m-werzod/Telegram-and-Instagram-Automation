@@ -22,32 +22,23 @@
 	reverse_proxy app:3000
 }
 
-# ── Public domain behind a TLS-terminating hosting gateway ──────────────────
-# On a shared-IP/NAT plan (e.g. Database Mart), public 80/443 belong to the
-# provider's gateway, which terminates TLS with its own certificate and
-# forwards PLAINTEXT to a mapped inner port. Caddy therefore must NOT try to
-# serve TLS for that hostname — it cannot complete an ACME challenge anyway,
-# since it never sees public 80/443. The explicit `http://` scheme disables
-# automatic HTTPS and the HTTP→HTTPS redirect for this site only.
+# ── Traffic arriving through a TLS-terminating hosting gateway ──────────────
+# On a shared-IP/NAT plan the provider owns public 80/443. Its gateway holds
+# the publicly-trusted certificate for your domain, terminates TLS there, and
+# forwards PLAINTEXT to whichever inner port the domain is mapped to. Measured
+# against the live gateway: with a valid Let's Encrypt certificate in front, a
+# request to inner 443 still arrived as plain HTTP and Caddy answered
+# "Client sent an HTTP request to an HTTPS server".
 #
-# Point the provider's domain mapping at inner port 80 and set PUBLIC_DOMAIN
-# in .env. Left unset, this block matches a hostname nobody can resolve, so it
-# is inert.
-# Which of the two the gateway actually does is its implementation detail and
-# is not documented, so serve BOTH rather than guess: plaintext on :80, and TLS
-# on :443 with a locally-issued certificate the gateway accepts from its own
-# backend. Whichever it forwards, Caddy answers — and the operator never has to
-# delete and recreate the mapping to find out which.
-http://{$PUBLIC_DOMAIN:public-domain-not-configured.invalid} {
-	encode gzip
-	reverse_proxy app:3000
-}
-
-https://{$PUBLIC_DOMAIN:public-domain-not-configured.invalid} {
-	# Not a publicly-trusted certificate, and it does not need to be: the public
-	# certificate is the gateway's. This one only has to satisfy the hop between
-	# the gateway and this container.
-	tls internal
+# So the gateway's domain mapping must point at inner port 80, and this site
+# serves it: no TLS, no HTTP→HTTPS redirect, any Host. It is deliberately a
+# catch-all rather than a named domain, so adding a second domain in the
+# provider's panel needs no change here and no redeploy.
+#
+# Caddy routes by specificity, so the named site above still wins for
+# SITE_ADDRESS on :80 and keeps redirecting it to HTTPS. Inner 443 therefore
+# stays TLS, which is what the dashboard's Vercel proxy connects to.
+:80 {
 	encode gzip
 	reverse_proxy app:3000
 }

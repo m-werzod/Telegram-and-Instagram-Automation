@@ -66,8 +66,6 @@ services:
       - "443:443"
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:-:80}
-      # Public hostname served over plaintext behind a TLS-terminating gateway.
-      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-public-domain-not-configured.invalid}
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
