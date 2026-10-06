@@ -21,3 +21,19 @@
 	encode gzip
 	reverse_proxy app:3000
 }
+
+# ── Public domain behind a TLS-terminating hosting gateway ──────────────────
+# On a shared-IP/NAT plan (e.g. Database Mart), public 80/443 belong to the
+# provider's gateway, which terminates TLS with its own certificate and
+# forwards PLAINTEXT to a mapped inner port. Caddy therefore must NOT try to
+# serve TLS for that hostname — it cannot complete an ACME challenge anyway,
+# since it never sees public 80/443. The explicit `http://` scheme disables
+# automatic HTTPS and the HTTP→HTTPS redirect for this site only.
+#
+# Point the provider's domain mapping at inner port 80 and set PUBLIC_DOMAIN
+# in .env. Left unset, this block matches a hostname nobody can resolve, so it
+# is inert.
+http://{$PUBLIC_DOMAIN:public-domain-not-configured.invalid} {
+	encode gzip
+	reverse_proxy app:3000
+}
