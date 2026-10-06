@@ -33,7 +33,21 @@
 # Point the provider's domain mapping at inner port 80 and set PUBLIC_DOMAIN
 # in .env. Left unset, this block matches a hostname nobody can resolve, so it
 # is inert.
+# Which of the two the gateway actually does is its implementation detail and
+# is not documented, so serve BOTH rather than guess: plaintext on :80, and TLS
+# on :443 with a locally-issued certificate the gateway accepts from its own
+# backend. Whichever it forwards, Caddy answers — and the operator never has to
+# delete and recreate the mapping to find out which.
 http://{$PUBLIC_DOMAIN:public-domain-not-configured.invalid} {
+	encode gzip
+	reverse_proxy app:3000
+}
+
+https://{$PUBLIC_DOMAIN:public-domain-not-configured.invalid} {
+	# Not a publicly-trusted certificate, and it does not need to be: the public
+	# certificate is the gateway's. This one only has to satisfy the hop between
+	# the gateway and this container.
+	tls internal
 	encode gzip
 	reverse_proxy app:3000
 }
