@@ -141,7 +141,12 @@ export async function runAgentPipeline(input: PipelineInput): Promise<PipelineOu
   }
   const { provider } = resolved;
 
-  const system = buildSystemPrompt(input.agent, input.tenantName, input.channelKey);
+  const system = buildSystemPrompt(
+    input.agent,
+    input.tenantName,
+    input.channelKey,
+    settings.contactFallback,
+  );
   const messages = buildMessages(history, {
     lead: input.lead,
     knowledge,
@@ -178,11 +183,12 @@ export async function runAgentPipeline(input: PipelineInput): Promise<PipelineOu
       // into an unparseable response, so leave room — max_tokens is a ceiling,
       // not a reservation, and costs nothing when unused.
       maxTokens: 8192,
-      // Short conversational replies + a small classification schema don't
-      // need the model's deepest reasoning tier (the default) — cuts cost
-      // meaningfully with no quality loss for this workload shape, while
-      // staying above 'low' since escalation/lead-capture accuracy matters.
-      effort: 'medium',
+      // Measured on production traffic: at 'medium' a one-line greeting cost
+      // ~1,400 reasoning tokens and 12–32 s end-to-end. On a chat channel the
+      // wait IS the product — a customer reads 20 s of silence as "nobody is
+      // there" — and this workload is short replies plus a small classification,
+      // not deep reasoning. 'low' keeps that accuracy at a fraction of the wait.
+      effort: 'low',
     });
 
     if (result.refused) {
@@ -294,7 +300,13 @@ export async function runAgentPipeline(input: PipelineInput): Promise<PipelineOu
     const reason =
       decision.escalationReason ??
       (verdict.forceEscalate ? `blocked by business rules (${verdict.suppressedReason})` : 'agent requested escalation');
-    await escalate(input, conversation.id, reason, settings);
+    // Pausing the agent is for conversations a human is taking OVER — not for
+    // the common case where the agent answered and merely flagged something
+    // for follow-up ("I'll check that and get back to you"). Pausing there
+    // mutes the conversation permanently: every later message is skipped, so
+    // one "I don't know" silently ends the relationship. Only a turn we did
+    // NOT reply to is a real handover.
+    await escalate(input, conversation.id, reason, settings, verdict.allowSend);
     escalated = true;
   }
 
@@ -311,6 +323,8 @@ async function escalate(
   conversationId: string,
   reason: string,
   settings: AgentSettings,
+  /** True when this turn still produced a reply — then it is a flag, not a handover. */
+  replied = false,
 ): Promise<void> {
   await executeTool(
     'escalateToHuman',
@@ -318,7 +332,7 @@ async function escalate(
       conversationId,
       leadId: input.lead?.id ?? null,
       reason,
-      pauseAgent: settings.pauseOnEscalation,
+      pauseAgent: settings.pauseOnEscalation && !replied,
     },
     { tenantId: input.tenantId, requestId: input.requestId },
   );

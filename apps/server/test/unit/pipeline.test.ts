@@ -141,9 +141,12 @@ describe('runAgentPipeline', () => {
     expect(outcome.verdict?.reply).toBeNull();
   });
 
-  it('escalation creates a handoff and pauses the conversation', async () => {
+  it('escalation creates a handoff, and hands the conversation over when it stayed silent', async () => {
+    // Silent + escalated is the real handover shape: nobody answered the
+    // customer, so a human must. (A turn that DID reply is covered below —
+    // that one must NOT pause, or the conversation dies after one flag.)
     ai.respondWith({
-      reply: 'Let me connect you with my colleague.',
+      reply: null,
       shouldEscalate: true,
       escalationReason: 'customer asked for a human',
     });
@@ -157,10 +160,43 @@ describe('runAgentPipeline', () => {
         data: expect.objectContaining({ reason: 'customer asked for a human' }),
       }),
     );
-    // pauseOnEscalation default true → conversation handed off.
     expect(prisma.conversation.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'HANDED_OFF' }) }),
     );
+  });
+
+  /**
+   * The bug this pins killed real conversations: the agent answered AND flagged
+   * a follow-up, the flag paused the conversation, and every later customer
+   * message was then skipped forever. A turn we replied to is not a handover.
+   */
+  it('does NOT pause the conversation when it escalated but still replied', async () => {
+    ai.respondWith({ reply: 'Men buni aniqlashtirib, javob beraman.', shouldEscalate: true, escalationReason: 'fact not in knowledge base' });
+    const outcome = await runAgentPipeline(baseInput());
+
+    expect(outcome.status).toBe('replied');
+    expect(outcome.escalated).toBe(true);
+    const call = prisma.toolExecution.create.mock.calls.find((c) =>
+      JSON.stringify((c[0] as { data: unknown }).data).includes('escalateToHuman'),
+    );
+    expect(JSON.stringify((call![0] as { data: unknown }).data)).toContain('"pauseAgent":false');
+  });
+
+  it('DOES pause when it escalated without replying — a real human handover', async () => {
+    ai.respondWith({ reply: null, shouldEscalate: true, escalationReason: 'customer asked for a human' });
+    const outcome = await runAgentPipeline(baseInput());
+
+    expect(outcome.status).toBe('silent');
+    const call = prisma.toolExecution.create.mock.calls.find((c) =>
+      JSON.stringify((c[0] as { data: unknown }).data).includes('escalateToHuman'),
+    );
+    expect(JSON.stringify((call![0] as { data: unknown }).data)).toContain('"pauseAgent":true');
+  });
+
+  // 12-32 s of silence on a chat channel reads as "nobody is there".
+  it('asks the provider for the low reasoning tier so replies are not 20s late', async () => {
+    await runAgentPipeline(baseInput());
+    expect(ai.calls[0]!.effort).toBe('low');
   });
 
   it('banned phrases block the reply and force escalation', async () => {

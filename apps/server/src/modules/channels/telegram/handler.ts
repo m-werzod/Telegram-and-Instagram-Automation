@@ -46,6 +46,38 @@ export function toStoredBusinessConnection(bc: TgBusinessConnection): StoredBusi
 }
 
 /**
+ * Keep "typing…" visible for as long as the agent is thinking.
+ *
+ * Telegram clears the indicator after ~5 s, and generation measured 12–32 s on
+ * production traffic — so a single chatAction before a slow call shows nothing
+ * by the time the reply lands. Worse, the handler used to send it AFTER
+ * awaiting the pipeline, meaning the customer watched an idle chat for the
+ * whole generation and read it as "nobody is there". This refreshes every 4 s
+ * until stopped, so the chat behaves exactly like a person replying.
+ *
+ * Cosmetic by contract: every failure is swallowed — a missing typing bubble
+ * must never cost a reply.
+ */
+function startTyping(
+  client: TelegramClient,
+  chatId: number | string,
+  opts: { businessConnectionId?: string } = {},
+): () => void {
+  let stopped = false;
+  const ping = (): void => {
+    if (stopped) return;
+    void client.sendChatAction(chatId, 'typing', opts).catch(() => undefined);
+  };
+  ping();
+  const timer = setInterval(ping, 4_000);
+  timer.unref?.();
+  return () => {
+    stopped = true;
+    clearInterval(timer);
+  };
+}
+
+/**
  * Telegram event processing (spec §14): update → lead → conversation →
  * persist inbound → agent pipeline → send reply → persist outbound.
  * The event row is already persisted & deduplicated by update_id.
@@ -177,17 +209,24 @@ export async function processTelegramEvent(event: WebhookEvent): Promise<void> {
     }
   }
 
-  const outcome = await runAgentPipeline({
-    tenantId,
-    tenantName: tenant.name,
-    agent,
-    conversationId: conversation.id,
-    lead,
-    channelKey: 'telegram',
-    inboundText: message.text,
-    username: message.from.username ?? null,
-    requestId,
-  });
+  // Typing starts BEFORE generation, not after it — see startTyping().
+  const stopTyping = startTyping(getTelegramClient(connection), message.chat.id);
+  let outcome;
+  try {
+    outcome = await runAgentPipeline({
+      tenantId,
+      tenantName: tenant.name,
+      agent,
+      conversationId: conversation.id,
+      lead,
+      channelKey: 'telegram',
+      inboundText: message.text,
+      username: message.from.username ?? null,
+      requestId,
+    });
+  } finally {
+    stopTyping();
+  }
 
   if (outcome.status === 'failed') {
     // Retryable: the queue re-runs this event; sends below are idempotency-guarded.
@@ -196,11 +235,6 @@ export async function processTelegramEvent(event: WebhookEvent): Promise<void> {
 
   if (outcome.status === 'replied' && outcome.verdict?.reply) {
     const client = getTelegramClient(connection);
-    try {
-      await client.sendChatAction(message.chat.id, 'typing');
-    } catch {
-      // typing indicator is cosmetic — ignore failures
-    }
     // Per-part idempotency: if part 2 of a long reply hits flood control, the
     // queue retry resumes at the failed part instead of re-sending part 1.
     const parts = splitMessage(outcome.verdict.reply, TELEGRAM_MAX_MESSAGE);
@@ -545,17 +579,27 @@ async function processPersonalMessage(
     knowledgeBaseId: account.knowledgeBaseId ?? agent.knowledgeBaseId,
   };
 
-  const outcome = await runAgentPipeline({
-    tenantId,
-    tenantName: tenant.name,
-    agent: effectiveAgent,
-    conversationId: conversation.id,
-    lead,
-    channelKey: 'telegram_personal',
-    inboundText: message.text,
-    username: message.from.username ?? null,
-    requestId,
+  // The owner's account must look like the owner is typing — from the moment
+  // the message arrives, not once the model is done.
+  const stopTyping = startTyping(getTelegramClient(connection), message.chat.id, {
+    businessConnectionId: account.businessConnectionId,
   });
+  let outcome;
+  try {
+    outcome = await runAgentPipeline({
+      tenantId,
+      tenantName: tenant.name,
+      agent: effectiveAgent,
+      conversationId: conversation.id,
+      lead,
+      channelKey: 'telegram_personal',
+      inboundText: message.text,
+      username: message.from.username ?? null,
+      requestId,
+    });
+  } finally {
+    stopTyping();
+  }
 
   if (outcome.status === 'failed') {
     throw new AppError(outcome.error ?? 'agent pipeline failed', { retryable: true });
@@ -564,11 +608,6 @@ async function processPersonalMessage(
   if (outcome.status === 'replied' && outcome.verdict?.reply) {
     const client = getTelegramClient(connection);
     const bcId = account.businessConnectionId;
-    try {
-      await client.sendChatAction(message.chat.id, 'typing', { businessConnectionId: bcId });
-    } catch {
-      // cosmetic
-    }
     const parts = splitMessage(outcome.verdict.reply, TELEGRAM_MAX_MESSAGE);
     for (let i = 0; i < parts.length; i++) {
       const key = `tg_personal_reply:${connection.id}:${update.update_id}:${i}`;

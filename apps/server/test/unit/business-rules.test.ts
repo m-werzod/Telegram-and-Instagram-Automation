@@ -89,6 +89,7 @@ describe('parseAgentSettings', () => {
       publicReplyOnPrivate: true,
       skipTrivialComments: true,
       welcomeImageMediaId: null,
+      contactFallback: null,
     });
   });
 
@@ -116,6 +117,7 @@ describe('parseAgentSettings', () => {
           publicReplyOnPrivate: false,
           skipTrivialComments: false,
           welcomeImageMediaId: 'media-9',
+          contactFallback: '+998 55 252 37 37',
         } as never,
       }),
     );
@@ -126,6 +128,7 @@ describe('parseAgentSettings', () => {
       publicReplyOnPrivate: false,
       skipTrivialComments: false,
       welcomeImageMediaId: 'media-9',
+      contactFallback: '+998 55 252 37 37',
     });
   });
 });

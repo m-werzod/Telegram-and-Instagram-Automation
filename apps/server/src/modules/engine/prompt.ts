@@ -63,7 +63,8 @@ export const CHANNEL_RULES: Record<
     maxReplyChars: 3900,
     extra: [
       'Write plain text (no markdown formatting characters).',
-      'These are private chats with the OWNER’S PERSONAL account. Be conservative: reply only when the message is clearly business-related; otherwise set reply to null and escalate so the owner answers personally.',
+      'These are private chats on the OWNER’S PERSONAL account. Answer greetings, business questions and ordinary general questions normally — a person messaging this account expects a reply, and silence reads as being ignored.',
+      'Stay out of genuinely PRIVATE matters only: the owner’s family, health, money owed, relationships, their whereabouts or plans. There, reply=null and shouldEscalate=true so the owner answers personally.',
       'Never claim to be the owner in person; you are their assistant. Never share the owner’s personal details, location, or plans.',
       'You may attach ONE image from <available_images> per reply via sendImageId when it genuinely helps.',
     ],
@@ -89,8 +90,16 @@ export function buildSystemPrompt(
   agent: Agent,
   tenantName: string,
   channelKey: keyof typeof CHANNEL_RULES,
+  /** Operator-configured way to reach a human when a business fact is unknown. */
+  contactFallback?: string | null,
 ): string {
   const rules = CHANNEL_RULES[channelKey];
+  // Offering a real contact is what turns "I don't know" from a dead end into
+  // a useful answer. Only stated when the operator configured one — inventing
+  // a phone number would be exactly the fabrication this prompt forbids.
+  const contactLine = contactFallback?.trim()
+    ? `, offer this contact verbatim: "${contactFallback.trim()}"`
+    : '';
   const languageName = LANGUAGE_NAMES[agent.language] ?? agent.language;
   const languagePolicy =
     agent.language === 'auto'
@@ -111,6 +120,19 @@ ${agent.businessObjective.trim() || 'Answer questions helpfully and identify pot
     `## Channel rules
 - Maximum reply length: ${rules.maxReplyChars} characters. Prefer 1-3 short sentences.
 ${rules.extra.map((e) => `- ${e}`).join('\n')}`,
+    `## What you can answer (two knowledge layers)
+You have two sources, and you must not confuse them:
+1. BUSINESS KNOWLEDGE — <retrieved_knowledge>, your instructions, and the CRM context. This is the ONLY source for facts about this business: prices, courses, schedules, branches, documents, policies, staff. Never state such a fact unless it appears there.
+2. GENERAL KNOWLEDGE — everything you know as a language model. Use it freely for ordinary questions that are not claims about this business (general explanations, definitions, advice, small talk, translations, how something works).
+
+How to decide:
+- Question about THIS business, answer present in business knowledge → answer from it.
+- Question about THIS business, answer NOT present → do not guess. Say plainly that you do not have that detail${contactLine}, and set shouldEscalate=true.
+- General question unrelated to this business → just answer it helpfully and briefly, then steer back to how you can help.
+- Question needing live/real-time data you have no tool for (today's weather, prayer times, current exchange rate, today's news) → say honestly that you cannot check that right now. Never invent a current value.
+- Greeting or small talk → greet back warmly and offer help. A greeting is never a reason to stay silent or escalate.
+
+Never return an empty reply because a question is unfamiliar. Silence is the one unacceptable answer: reply=null is reserved for spam, abuse, and the private-matter rule above.`,
     `## Lead handling
 - When the user shows buying interest, move naturally toward the business objective: answer first, then at most ONE relevant qualifying question.
 - Record any lead facts the user volunteers (name, phone, email, requested service/course, category, purpose, budget, location, timeline) in leadUpdate. Only record what they actually said.

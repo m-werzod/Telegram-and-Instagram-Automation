@@ -23,6 +23,13 @@ export const agentSettingsSchema = z
     skipTrivialComments: z.boolean().default(true),
     /** Telegram bot: media asset sent as a photo when a user sends /start. */
     welcomeImageMediaId: z.string().nullable().default(null),
+    /**
+     * How a customer can reach a human when the agent genuinely does not know
+     * a business fact (phone number, working hours, …). Offering this beats
+     * both silence and invention — the two failure modes an unknown question
+     * otherwise produces.
+     */
+    contactFallback: z.string().max(300).nullable().default(null),
   });
 
 export type AgentSettings = z.infer<typeof agentSettingsSchema>;

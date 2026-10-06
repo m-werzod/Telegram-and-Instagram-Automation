@@ -16,6 +16,7 @@ interface Settings {
   bannedPhrases: string[];
   maxRepliesPerHour: number;
   pauseOnEscalation: boolean;
+  contactFallback: string | null;
   publicReplyOnPrivate: boolean;
   skipTrivialComments: boolean;
   welcomeImageMediaId: string | null;
@@ -25,6 +26,7 @@ const DEFAULT_SETTINGS: Settings = {
   bannedPhrases: [],
   maxRepliesPerHour: 20,
   pauseOnEscalation: true,
+  contactFallback: null,
   publicReplyOnPrivate: true,
   skipTrivialComments: true,
   welcomeImageMediaId: null,
@@ -210,6 +212,19 @@ export default function AgentEdit() {
             />
           </label>
           <label className="field">
+            <span className="name">Javob topilmaganda beriladigan aloqa (telefon, ish vaqti)</span>
+            <input
+              type="text"
+              placeholder="+998 55 252 37 37 (Dushanba–Shanba 09:00–18:00)"
+              value={settings.contactFallback ?? ''}
+              onChange={(e) => setSettings({ ...settings, contactFallback: e.target.value.trim() || null })}
+            />
+            <span className="hint">
+              Agent bilimlar bazasida javob topa olmasa, shu matnni aynan shu holicha taklif qiladi —
+              jim qolish yoki o'ylab topish o'rniga. Bo'sh qoldirsangiz, hech qanday aloqa taklif qilmaydi.
+            </span>
+          </label>
+          <label className="field">
             <span className="name">Taqiqlangan so'zlar (har bir qatorda bittadan — bular bo'lsa javob yuborilmaydi)</span>
             <textarea
               value={settings.bannedPhrases.join('\n')}
@@ -227,6 +242,9 @@ export default function AgentEdit() {
               onChange={(e) => setSettings({ ...settings, pauseOnEscalation: e.target.checked })}
             />
             Eskalatsiyadan keyin agentni shu suhbatda to'xtatish
+            <span className="hint" style={{ marginTop: 0 }}>
+              (faqat agent javob bermagan holatlarda — javob bergan bo'lsa suhbat davom etadi)
+            </span>
           </label>
           {form.type === 'INSTAGRAM_COMMENT' && (
             <label className="row" style={{ gap: 8 }}>
