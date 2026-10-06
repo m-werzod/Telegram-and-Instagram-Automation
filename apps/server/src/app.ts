@@ -17,6 +17,7 @@ import { authRoutes } from './api/auth-routes.js';
 import { connectionRoutes } from './api/connection-routes.js';
 import { crmRoutes } from './api/crm-routes.js';
 import { knowledgeRoutes } from './api/knowledge-routes.js';
+import { legalRoutes } from './api/legal-routes.js';
 import { mediaRoutes } from './api/media-routes.js';
 import { opsRoutes } from './api/ops-routes.js';
 import { settingsRoutes } from './api/settings-routes.js';
@@ -121,6 +122,11 @@ export async function buildApp(env: Env): Promise<FastifyInstance> {
   // Webhooks (public, verified by signature / secret token).
   await app.register(instagramWebhookRoutes);
   await app.register(telegramWebhookRoutes);
+
+  // Public legal pages (Meta requires a privacy policy + data deletion URL
+  // before an app may go Live). Registered before the SPA fallback so they are
+  // served as real pages rather than the dashboard shell.
+  await app.register(legalRoutes);
 
   // Media (public raw serving + authenticated management).
   await app.register(mediaRoutes);
