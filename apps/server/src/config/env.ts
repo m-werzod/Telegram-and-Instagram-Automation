@@ -59,6 +59,9 @@ const envSchema = z.object({
   // Meta / Instagram
   META_APP_ID: z.string().optional(),
   META_APP_SECRET: z.string().optional(),
+  /** "Instagram app secret" from Instagram Login setup — a DIFFERENT credential
+   *  from META_APP_SECRET, and the one Meta may sign Instagram webhooks with. */
+  META_IG_APP_SECRET: z.string().optional(),
   /** Token you choose; entered verbatim in the Meta App Dashboard webhook configuration. */
   META_VERIFY_TOKEN: z.string().optional(),
   /** Optional: seed an Instagram connection from env instead of the dashboard. */

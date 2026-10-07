@@ -31,6 +31,11 @@ const SETTING_META: Record<string, { label: string; hint: string; placeholder: s
     hint: 'App ID bilan bir xil sahifada. Instagram webhook imzosini tekshirish uchun ishlatiladi.',
     placeholder: 'abc123…',
   },
+  META_IG_APP_SECRET: {
+    label: 'Instagram App secret (Instagram Login)',
+    hint: "Meta ilovangizda Instagram Login ishlatilsa, u ALOHIDA sirga ega. Uni https://developers.facebook.com/apps → Use cases → \"Manage messaging & content on Instagram\" → Customize → \"API setup with Instagram login\" → \"Instagram app secret\" → Show orqali oling. Instagram webhook imzolari shu sir bilan imzolanishi mumkin — ikkalasi ham tekshiriladi, shuning uchun uni kiritish xavfsiz.",
+    placeholder: '••••••••',
+  },
   META_VERIFY_TOKEN: {
     label: 'Meta webhook verify token',
     hint: "O'zingiz tanlagan istalgan tasodifiy matn. Xuddi shu qiymatni Meta App Dashboard webhook sozlamalariga kiriting.",

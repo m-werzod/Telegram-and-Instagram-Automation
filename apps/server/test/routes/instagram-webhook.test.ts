@@ -206,3 +206,73 @@ describe('Instagram webhook routes', () => {
     });
   });
 });
+
+/**
+ * An app configured with Instagram Login carries two secrets — the Facebook App
+ * Secret and a separate "Instagram app secret" — and Meta's documentation does
+ * not say which one signs the webhook. Guessing wrong rejects every event with a
+ * 401, which from the outside is indistinguishable from Meta never sending
+ * anything at all. So a signature from either is accepted.
+ */
+describe('Instagram webhook — dual app secret', () => {
+  const FB = 'facebook-app-secret';
+  const IG = 'instagram-app-secret';
+  const payload = JSON.stringify({
+    object: 'instagram',
+    entry: [
+      {
+        id: '17841400000000000',
+        messaging: [
+          { sender: { id: 'igsid-1' }, recipient: { id: '17841400000000000' }, message: { mid: 'mid-dual-1', text: 'Salom' } },
+        ],
+      },
+    ],
+  });
+
+  let app: FastifyInstance;
+  let prisma: ReturnType<typeof mockPrisma>;
+  let enqueued: Array<{ name: string; payload: unknown }>;
+
+  beforeEach(async () => {
+    initLogger('silent', false);
+    prisma = mockPrisma();
+    prisma.install();
+    prisma.channelConnection.findFirst.mockResolvedValue({ id: 'conn-1', tenantId: 'tenant-1' });
+    prisma.webhookEvent.create.mockResolvedValue({ id: 'evt-1' });
+    prisma.webhookEvent.update.mockResolvedValue({ id: 'evt-1' });
+    const q = stubQueue();
+    enqueued = q.enqueued;
+    setQueueForTesting(q.queue);
+    app = await buildApp(
+      makeTestEnv({ META_APP_SECRET: FB, META_IG_APP_SECRET: IG, META_VERIFY_TOKEN: 'tok' }),
+    );
+  });
+  afterEach(async () => {
+    await app.close();
+    vi.restoreAllMocks();
+  });
+
+  const post = (secret: string) =>
+    app.inject({
+      method: 'POST',
+      url: '/api/webhooks/instagram',
+      headers: { 'content-type': 'application/json', 'x-hub-signature-256': sign(secret, payload) },
+      payload,
+    });
+
+  it('accepts a payload signed with the Instagram app secret', async () => {
+    expect((await post(IG)).statusCode).toBe(200);
+    expect(enqueued).toHaveLength(1);
+    expect(prisma.webhookEvent.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('still accepts a payload signed with the Facebook app secret', async () => {
+    expect((await post(FB)).statusCode).toBe(200);
+    expect(enqueued).toHaveLength(1);
+  });
+
+  it('still rejects a payload signed with neither', async () => {
+    expect((await post('some-other-secret')).statusCode).toBe(401);
+    expect(enqueued).toHaveLength(0);
+  });
+});

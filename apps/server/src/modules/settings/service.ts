@@ -18,6 +18,7 @@ export const SETTING_KEYS = [
   'OPENAI_API_KEY',
   'META_APP_ID',
   'META_APP_SECRET',
+  'META_IG_APP_SECRET',
   'META_VERIFY_TOKEN',
 ] as const;
 export type SettingKey = (typeof SETTING_KEYS)[number];
@@ -76,6 +77,8 @@ function envFallback(key: SettingKey): string | null {
       return env.META_APP_ID ?? null;
     case 'META_APP_SECRET':
       return env.META_APP_SECRET ?? null;
+    case 'META_IG_APP_SECRET':
+      return env.META_IG_APP_SECRET ?? null;
     case 'META_VERIFY_TOKEN':
       return env.META_VERIFY_TOKEN ?? null;
   }

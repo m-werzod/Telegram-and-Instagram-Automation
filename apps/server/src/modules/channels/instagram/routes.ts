@@ -32,9 +32,20 @@ export async function instagramWebhookRoutes(app: FastifyInstance): Promise<void
   });
 
   app.post('/api/webhooks/instagram', { config: { rateLimit: false } }, async (req, reply) => {
-    const appSecret = await resolveGlobalSetting('META_APP_SECRET');
-    if (!appSecret) {
-      req.log.error('META_APP_SECRET not configured (Settings page or env) — rejecting webhook');
+    // An app set up with Instagram Login carries TWO secrets — the Facebook
+    // App Secret and a separate "Instagram app secret" — and which one Meta
+    // signs with is not stated in the documentation. Getting it wrong rejects
+    // every event with a 401 and looks exactly like no events being sent, so
+    // accept a signature matching either configured secret. Both are checked
+    // constant-time; an unconfigured one simply has nothing to match.
+    const secrets = (
+      await Promise.all([
+        resolveGlobalSetting('META_APP_SECRET'),
+        resolveGlobalSetting('META_IG_APP_SECRET'),
+      ])
+    ).filter((value): value is string => Boolean(value));
+    if (secrets.length === 0) {
+      req.log.error('no Meta app secret configured (Settings page or env) — rejecting webhook');
       return reply.code(503).send();
     }
 
@@ -43,9 +54,17 @@ export async function instagramWebhookRoutes(app: FastifyInstance): Promise<void
     if (typeof signature !== 'string' || !rawBody) {
       return reply.code(401).send();
     }
-    const expected = `sha256=${hmacSha256Hex(appSecret, rawBody)}`;
-    if (!safeEqual(signature, expected)) {
-      req.log.warn('instagram webhook signature mismatch');
+    // Every candidate is compared even after a match so the work does not
+    // depend on which secret was correct.
+    const matched = secrets.reduce(
+      (found, secret) => safeEqual(signature, `sha256=${hmacSha256Hex(secret, rawBody)}`) || found,
+      false,
+    );
+    if (!matched) {
+      req.log.warn(
+        { secretsTried: secrets.length },
+        'instagram webhook signature mismatch — the signing secret is wrong. An app using Instagram Login signs with the "Instagram app secret" shown under API setup with Instagram login; store it as META_IG_APP_SECRET.',
+      );
       return reply.code(401).send();
     }
 
