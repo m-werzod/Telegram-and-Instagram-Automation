@@ -21,6 +21,7 @@ import { legalRoutes } from './api/legal-routes.js';
 import { mediaRoutes } from './api/media-routes.js';
 import { opsRoutes } from './api/ops-routes.js';
 import { settingsRoutes } from './api/settings-routes.js';
+import { teamRoutes } from './api/team-routes.js';
 import { telegramPersonalRoutes } from './api/telegram-personal-routes.js';
 import { instagramWebhookRoutes } from './modules/channels/instagram/routes.js';
 import { telegramWebhookRoutes } from './modules/channels/telegram/routes.js';
@@ -139,6 +140,7 @@ export async function buildApp(env: Env): Promise<FastifyInstance> {
   await app.register(crmRoutes);
   await app.register(knowledgeRoutes);
   await app.register(settingsRoutes);
+  await app.register(teamRoutes);
   await app.register(opsRoutes);
 
   // Dashboard SPA (built by apps/dashboard → public/dashboard).

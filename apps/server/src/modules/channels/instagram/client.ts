@@ -112,6 +112,27 @@ export class InstagramClient {
     });
   }
 
+  /**
+   * Presence signals on a conversation: `mark_seen` (the blue "Seen" marker)
+   * and `typing_on` / `typing_off` (the animated bubble).
+   *
+   * Meta requires these to be sent as their OWN request — a payload carrying
+   * both a sender_action and a message is rejected — so this never piggybacks
+   * on a send. Their guidance is that the gap between typing_on and the reply
+   * should look like a person typing, which is why typing is started when the
+   * message arrives rather than after the model has already answered.
+   *
+   * Source: Instagram Platform → Messaging API → Sender actions.
+   */
+  sendSenderAction(
+    igsid: string,
+    action: 'mark_seen' | 'typing_on' | 'typing_off',
+  ): Promise<{ recipient_id?: string }> {
+    return this.request('POST', `/me/messages`, {
+      json: { recipient: { id: igsid }, sender_action: action },
+    });
+  }
+
   /** DM to a user who has messaged the account (24-hour window). */
   sendMessage(igsid: string, text: string): Promise<{ recipient_id?: string; message_id?: string }> {
     return this.request('POST', `/me/messages`, {

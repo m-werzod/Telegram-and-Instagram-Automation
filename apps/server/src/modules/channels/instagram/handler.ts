@@ -11,6 +11,38 @@ import { claimIdempotency, releaseIdempotency } from '../shared/idempotency.js';
 import { getInstagramClient } from './service.js';
 
 /**
+ * Make the account behave like a person who is actually there: mark the
+ * message seen the moment it arrives, then show the typing bubble for as long
+ * as the agent is thinking.
+ *
+ * Instagram clears the bubble on its own after a short while, so it is
+ * refreshed on an interval rather than sent once — generation takes several
+ * seconds and a bubble that vanished before the reply lands reads as nobody
+ * being there, which is the same failure the Telegram handler had.
+ *
+ * Entirely cosmetic: every error is swallowed. A missing bubble must never
+ * cost a reply.
+ */
+function startInstagramPresence(client: InstagramClient, igsid: string): () => void {
+  let stopped = false;
+  void client.sendSenderAction(igsid, 'mark_seen').catch(() => undefined);
+  const ping = (): void => {
+    if (stopped) return;
+    void client.sendSenderAction(igsid, 'typing_on').catch(() => undefined);
+  };
+  ping();
+  const timer = setInterval(ping, 5_000);
+  timer.unref?.();
+  return () => {
+    stopped = true;
+    clearInterval(timer);
+    // Sending the reply clears the bubble, but an outcome with no reply
+    // (silent, escalated) would otherwise leave it spinning forever.
+    void client.sendSenderAction(igsid, 'typing_off').catch(() => undefined);
+  };
+}
+
+/**
  * Instagram event processing: the comment flow (spec §11) and the DM flow
  * (spec §12), built strictly on supported capabilities:
  *  - public comment reply (POST /{comment-id}/replies)
@@ -361,17 +393,24 @@ async function processDm(
   }
 
   const freshLead = await prisma.lead.findUnique({ where: { id: lead.id } });
-  const outcome = await runAgentPipeline({
-    tenantId,
-    tenantName: tenant.name,
-    agent,
-    conversationId: conversation.id,
-    lead: freshLead ?? lead,
-    channelKey: 'instagram_dm',
-    inboundText: text,
-    username: freshLead?.username ?? null,
-    requestId,
-  });
+  // Seen + typing start now, not after the model answers.
+  const stopPresence = startInstagramPresence(client, igsid);
+  let outcome;
+  try {
+    outcome = await runAgentPipeline({
+      tenantId,
+      tenantName: tenant.name,
+      agent,
+      conversationId: conversation.id,
+      lead: freshLead ?? lead,
+      channelKey: 'instagram_dm',
+      inboundText: text,
+      username: freshLead?.username ?? null,
+      requestId,
+    });
+  } finally {
+    stopPresence();
+  }
 
   if (outcome.status === 'failed') {
     throw new AppError(outcome.error ?? 'agent pipeline failed', { retryable: true });

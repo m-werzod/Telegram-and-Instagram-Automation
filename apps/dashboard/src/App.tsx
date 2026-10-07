@@ -16,6 +16,7 @@ import Connections from './pages/Connections';
 import TelegramPage from './pages/TelegramPage';
 import Media from './pages/Media';
 import Settings from './pages/Settings';
+import Team from './pages/Team';
 import Leads from './pages/Leads';
 import LeadDetail from './pages/LeadDetail';
 import Knowledge from './pages/Knowledge';
@@ -215,6 +216,9 @@ function Shell({
           <Route path="/telegram" element={<TelegramPage isAdmin={user.role === 'ADMIN'} />} />
           <Route path="/media" element={<Media isAdmin={user.role === 'ADMIN'} />} />
           {user.role === 'ADMIN' && <Route path="/settings" element={<Settings />} />}
+          {user.role === 'ADMIN' && (
+            <Route path="/team" element={<Team me={{ id: user.id, role: user.role }} />} />
+          )}
           <Route path="/leads" element={<Leads />} />
           <Route path="/leads/:id" element={<LeadDetail />} />
           <Route path="/knowledge" element={<Knowledge />} />
