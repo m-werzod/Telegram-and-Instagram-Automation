@@ -13,10 +13,19 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    proxy: {
-      // DEV_API_TARGET points dev at a non-local backend (e.g. a staging host).
-      '/api': process.env.DEV_API_TARGET ?? 'http://localhost:3000',
-      '/files': process.env.DEV_API_TARGET ?? 'http://localhost:3000',
-    },
+    proxy: apiProxy(),
+  },
+  // `vite preview` serves the real production build, which is the only way to
+  // exercise the service worker and the install prompt locally (both are
+  // compiled out of dev). It needs the same API proxy to be usable at all.
+  preview: {
+    port: 4173,
+    proxy: apiProxy(),
   },
 });
+
+/** DEV_API_TARGET points at a non-local backend (e.g. the deployed host). */
+function apiProxy(): Record<string, string> {
+  const target = process.env.DEV_API_TARGET ?? 'http://localhost:3000';
+  return { '/api': target, '/files': target };
+}

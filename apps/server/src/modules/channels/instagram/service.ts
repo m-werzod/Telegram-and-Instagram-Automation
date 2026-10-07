@@ -47,11 +47,44 @@ export async function connectInstagram(
   const accountId = me.user_id ?? me.id;
   if (!accountId) throw new ValidationError('Could not resolve the Instagram account id from this token');
 
-  // 2. Persist encrypted.
+  // 2. If this token belongs to a DIFFERENT account than the one currently
+  //    automated, release the old one FIRST. Overwriting the row alone leaves
+  //    the previous account subscribed at Meta: its comments and DMs keep
+  //    arriving here forever, matching no connection and silently discarded.
+  //    That is what a handover to a real business owner must not leave behind.
+  const previous = await prisma.channelConnection.findUnique({
+    where: { tenantId_channel: { tenantId, channel: 'INSTAGRAM' } },
+  });
+  const switchedAccount =
+    previous?.status === 'connected' &&
+    Boolean(previous.credentialsEncrypted) &&
+    previous.externalAccountId !== String(accountId);
+  const release = switchedAccount
+    ? await releaseInstagramAccount(previous!, 'replaced by a different Instagram account')
+    : null;
+
+  // 3. Persist encrypted.
   const credentialsEncrypted = encryptSecret(
     JSON.stringify({ accessToken: token, obtainedAt: Date.now() } satisfies InstagramCredentials),
     env.ENCRYPTION_KEY,
   );
+  const metadata = {
+    username: me.username ?? null,
+    accountType: me.account_type ?? null,
+    // What happened to the account that was automated until now, so the
+    // dashboard can state it instead of implying a clean handover.
+    ...(switchedAccount
+      ? {
+          previousAccount: {
+            displayName: previous!.displayName,
+            externalAccountId: previous!.externalAccountId,
+            releasedAt: new Date().toISOString(),
+            released: release?.released ?? false,
+            error: release?.error ?? null,
+          },
+        }
+      : {}),
+  };
   const connection = await prisma.channelConnection.upsert({
     where: { tenantId_channel: { tenantId, channel: 'INSTAGRAM' } },
     create: {
@@ -61,18 +94,18 @@ export async function connectInstagram(
       displayName: me.username ? `@${me.username}` : (me.name ?? 'Instagram account'),
       externalAccountId: String(accountId),
       credentialsEncrypted,
-      metadata: { username: me.username ?? null, accountType: me.account_type ?? null },
+      metadata,
     },
     update: {
       status: 'connected',
       displayName: me.username ? `@${me.username}` : (me.name ?? 'Instagram account'),
       externalAccountId: String(accountId),
       credentialsEncrypted,
-      metadata: { username: me.username ?? null, accountType: me.account_type ?? null },
+      metadata,
     },
   });
 
-  // 3. Automate per-account webhook subscription (the part the API allows).
+  // 4. Automate per-account webhook subscription (the part the API allows).
   let subscribed = false;
   try {
     await client.subscribeApps(SUBSCRIBED_FIELDS);
@@ -93,9 +126,58 @@ export async function connectInstagram(
     },
   });
 
-  // 4. Emit the exact Meta dashboard steps that cannot be automated (spec §16, §28).
+  // 5. Emit the exact Meta dashboard steps that cannot be automated (spec §16, §28).
   await createMetaManualActions(tenantId);
+
+  if (switchedAccount) {
+    log.info(
+      { from: previous!.displayName, to: connection.displayName, released: release?.released },
+      'instagram account switched',
+    );
+    await prisma.auditLog
+      .create({
+        data: {
+          tenantId,
+          action: 'connection.instagram.switched',
+          resource: 'channel_connection',
+          resourceId: connection.id,
+          detail: {
+            from: { account: previous!.displayName, externalAccountId: previous!.externalAccountId },
+            to: { account: connection.displayName, externalAccountId: connection.externalAccountId },
+            previousAccountReleased: release?.released ?? false,
+            releaseError: release?.error ?? null,
+          },
+        },
+      })
+      .catch(() => undefined);
+  }
   return (await prisma.channelConnection.findUnique({ where: { id: connection.id } }))!;
+}
+
+/**
+ * Cut an Instagram account off from this platform: delete its webhook
+ * subscription so Meta stops delivering its events here.
+ *
+ * Best effort by design — the stored token may already be expired or revoked,
+ * and a handover must not be blocked by an account that cannot be reached. The
+ * outcome is returned so the caller can report honestly rather than claim a
+ * clean release that did not happen.
+ */
+export async function releaseInstagramAccount(
+  connection: ChannelConnection,
+  reason: string,
+): Promise<{ released: boolean; error: string | null }> {
+  const log = childLogger({ module: 'instagram', tenantId: connection.tenantId });
+  if (!connection.credentialsEncrypted) return { released: false, error: 'no stored credentials' };
+  try {
+    await getInstagramClient(connection).unsubscribeApps();
+    log.info({ account: connection.displayName, reason }, 'instagram account released');
+    return { released: true, error: null };
+  } catch (err) {
+    const error = errorMessage(err);
+    log.warn({ account: connection.displayName, reason, err: error }, 'could not release instagram account');
+    return { released: false, error };
+  }
 }
 
 export async function createMetaManualActions(tenantId: string): Promise<void> {
@@ -175,12 +257,17 @@ export async function disconnectInstagram(tenantId: string): Promise<void> {
     where: { tenantId_channel: { tenantId, channel: 'INSTAGRAM' } },
   });
   if (!connection) return;
+  // Unsubscribe BEFORE the token is discarded — afterwards there is no way to
+  // tell Meta to stop, and it keeps delivering this account's events here.
+  const release = await releaseInstagramAccount(connection, 'disconnected by an administrator');
   await prisma.channelConnection.update({
     where: { id: connection.id },
     data: {
       status: 'disconnected',
       healthStatus: 'DISCONNECTED',
-      healthDetail: '',
+      healthDetail: release.released
+        ? ''
+        : `Disconnected here, but Meta was not told to stop sending events: ${release.error}. Remove this platform under Instagram → Settings → Apps and websites if it keeps delivering.`,
       credentialsEncrypted: '',
     },
   });

@@ -163,6 +163,15 @@ export class InstagramClient {
     });
   }
 
+  /**
+   * Stop webhook delivery for this account. Needed when the platform is moved
+   * to a different Instagram account: a subscription left behind keeps Meta
+   * POSTing the previous owner's comments and DMs to this server forever.
+   */
+  unsubscribeApps(): Promise<{ success?: boolean }> {
+    return this.request('DELETE', `/me/subscribed_apps`);
+  }
+
   /** Profile of a messaging user (consent exists only after they message). */
   getUserProfile(igsid: string): Promise<IgUserProfile> {
     return this.request<IgUserProfile>('GET', `/${igsid}`, {

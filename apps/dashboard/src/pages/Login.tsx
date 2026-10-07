@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { User, Lock, Eye, EyeOff, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { api, ApiError } from '../api';
 import BrandLogo from '../components/BrandLogo';
+import InstallAppButton from '../components/InstallAppButton';
 
 export default function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
   const [loginName, setLoginName] = useState('');
@@ -85,6 +86,10 @@ export default function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
         <button className="login-submit" disabled={busy || !loginName || !password} type="submit">
           {busy ? 'Kirilmoqda…' : 'Kirish'}
         </button>
+
+        <div className="login-install">
+          <InstallAppButton />
+        </div>
 
         <p className="login-footnote">
           <ShieldCheck size={13} strokeWidth={2} />

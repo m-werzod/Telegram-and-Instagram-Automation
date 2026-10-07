@@ -52,6 +52,51 @@ export async function crmRoutes(app: FastifyInstance): Promise<void> {
     return { leads, total, page, pageSize };
   });
 
+  /**
+   * Per-channel totals for the CRM header. The lead list is paginated, so the
+   * channel sections cannot count their own rows without reporting "Instagram:
+   * 4" when the page simply happens to hold four of them. Static segment, so
+   * find-my-way matches this before /api/leads/:id regardless of order.
+   */
+  app.get('/api/leads/summary', async (req) => {
+    const prisma = getPrisma();
+    const tenantId = tenantOf(req);
+    const [bySource, byStatus, total] = await Promise.all([
+      prisma.lead.groupBy({
+        by: ['source'],
+        where: { tenantId, mergedIntoId: null },
+        _count: { _all: true },
+      }),
+      prisma.lead.groupBy({
+        by: ['status'],
+        where: { tenantId, mergedIntoId: null },
+        _count: { _all: true },
+      }),
+      prisma.lead.count({ where: { tenantId, mergedIntoId: null } }),
+    ]);
+    const countOf = <T extends string>(
+      rows: Array<{ _count: { _all: number } } & Record<string, unknown>>,
+      key: string,
+      value: T,
+    ): number => rows.find((r) => r[key] === value)?._count._all ?? 0;
+
+    return {
+      summary: {
+        total,
+        bySource: {
+          INSTAGRAM: countOf(bySource, 'source', 'INSTAGRAM'),
+          TELEGRAM: countOf(bySource, 'source', 'TELEGRAM'),
+        },
+        byStatus: Object.fromEntries(
+          (['NEW', 'OPEN', 'QUALIFIED', 'CONVERTED', 'LOST', 'SPAM'] as const).map((st) => [
+            st,
+            countOf(byStatus, 'status', st),
+          ]),
+        ),
+      },
+    };
+  });
+
   app.get<{ Params: { id: string } }>('/api/leads/:id', async (req) => {
     const tenantId = tenantOf(req);
     const lead = await getPrisma().lead.findFirst({

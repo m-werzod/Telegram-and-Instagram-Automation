@@ -45,9 +45,9 @@ export default function ManualActions() {
             <h3 style={{ margin: 0 }}>{a.title}</h3>
             <span className="badge warn">{a.platform}</span>
           </div>
-          <p className="row" style={{ gap: 6 }}>
+          <p>
             Rasmiy sahifa:{' '}
-            <a href={a.officialUrl} target="_blank" rel="noreferrer" className="row" style={{ gap: 4 }}>
+            <a href={a.officialUrl} target="_blank" rel="noreferrer" className="url-link">
               {a.officialUrl} <ExternalLink size={12} />
             </a>
           </p>

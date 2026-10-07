@@ -43,18 +43,51 @@ export async function connectTelegram(tenantId: string, botToken: string): Promi
   const me = await client.getMe();
   if (!me.is_bot) throw new ValidationError('Token does not belong to a bot');
 
-  // 2. Persist (encrypted at rest). A reconnect must not wipe the stored
-  //    business-connection state of the personal account.
+  // 2. Persist (encrypted at rest). A reconnect with the SAME bot must not wipe
+  //    the stored business-connection state of the personal account; swapping in
+  //    a DIFFERENT bot must wipe exactly that, because those rows are issued by
+  //    the old bot and mean nothing to the new one.
   const credentialsEncrypted = encryptSecret(JSON.stringify({ botToken: token }), env.ENCRYPTION_KEY);
   const webhookSecret = generateToken(32).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 128) || generateToken(24);
 
   const existing = await prisma.channelConnection.findUnique({
     where: { tenantId_channel: { tenantId, channel: 'TELEGRAM' } },
   });
+  const switchedBot =
+    existing?.status === 'connected' &&
+    Boolean(existing.credentialsEncrypted) &&
+    existing.externalAccountId !== String(me.id);
+  const release = switchedBot
+    ? await releaseTelegramBot(existing!, 'replaced by a different bot')
+    : null;
+  let droppedPersonalAccounts = 0;
+  if (switchedBot) {
+    // Business connections belong to the OLD bot. Left in place they would
+    // show the previous owner's personal account on the new owner's dashboard
+    // and fail every health check against a bot that never issued them.
+    const dropped = await prisma.telegramPersonalAccount.deleteMany({ where: { tenantId } });
+    droppedPersonalAccounts = dropped.count;
+  }
   const metadata = {
-    ...((existing?.metadata as object) ?? {}),
+    // A bot swap starts from a clean slate: the old bot's webhook URL, channel
+    // mode and business-connection snapshot describe an account that is no
+    // longer automated.
+    ...(switchedBot ? {} : ((existing?.metadata as object) ?? {})),
     botUsername: me.username ?? null,
     botName: me.first_name,
+    // What happened to the account that was automated until now, so the
+    // dashboard can state it instead of implying a clean handover.
+    ...(switchedBot
+      ? {
+          previousAccount: {
+            displayName: existing!.displayName,
+            externalAccountId: existing!.externalAccountId,
+            releasedAt: new Date().toISOString(),
+            released: release?.released ?? false,
+            error: release?.error ?? null,
+          },
+        }
+      : {}),
   };
 
   const connection = await prisma.channelConnection.upsert({
@@ -125,7 +158,62 @@ export async function connectTelegram(tenantId: string, botToken: string): Promi
     whatToReturn: 'Nothing — the dashboard updates by itself. If it does not within a minute, check that Business Mode was enabled in @BotFather first.',
   });
 
+  if (switchedBot) {
+    childLogger({ module: 'telegram', tenantId }).info(
+      {
+        from: existing!.displayName,
+        to: connection.displayName,
+        released: release?.released,
+        droppedPersonalAccounts,
+      },
+      'telegram bot switched',
+    );
+    await prisma.auditLog
+      .create({
+        data: {
+          tenantId,
+          action: 'connection.telegram.switched',
+          resource: 'channel_connection',
+          resourceId: connection.id,
+          detail: {
+            from: { bot: existing!.displayName, externalAccountId: existing!.externalAccountId },
+            to: { bot: connection.displayName, externalAccountId: connection.externalAccountId },
+            previousBotReleased: release?.released ?? false,
+            releaseError: release?.error ?? null,
+            droppedPersonalAccounts,
+          },
+        },
+      })
+      .catch(() => undefined);
+  }
+
   return (await prisma.channelConnection.findUnique({ where: { id: connection.id } }))!;
+}
+
+/**
+ * Cut a bot off from this platform: stop any polling loop and delete its
+ * webhook so Telegram stops pushing its updates here.
+ *
+ * Best effort — the old token may already have been revoked in @BotFather, and
+ * a handover must not be blocked by a bot that can no longer be reached. The
+ * outcome is returned so the caller reports what actually happened.
+ */
+export async function releaseTelegramBot(
+  connection: ChannelConnection,
+  reason: string,
+): Promise<{ released: boolean; error: string | null }> {
+  const log = childLogger({ module: 'telegram', tenantId: connection.tenantId });
+  await stopPolling(connection.id);
+  if (!connection.credentialsEncrypted) return { released: false, error: 'no stored credentials' };
+  try {
+    await getTelegramClient(connection).deleteWebhook();
+    log.info({ bot: connection.displayName, reason }, 'telegram bot released');
+    return { released: true, error: null };
+  } catch (err) {
+    const error = errorMessage(err);
+    log.warn({ bot: connection.displayName, reason, err: error }, 'could not release telegram bot');
+    return { released: false, error };
+  }
 }
 
 /** (Re)configure the webhook and update health. Safe to call repeatedly. */
@@ -292,21 +380,17 @@ export async function disconnectTelegram(tenantId: string): Promise<void> {
     where: { tenantId_channel: { tenantId, channel: 'TELEGRAM' } },
   });
   if (!connection) return;
-  await stopPolling(connection.id);
-  try {
-    await getTelegramClient(connection).deleteWebhook();
-  } catch (err) {
-    childLogger({ module: 'telegram', tenantId }).warn(
-      { err: errorMessage(err) },
-      'deleteWebhook failed during disconnect (continuing)',
-    );
-  }
+  const release = await releaseTelegramBot(connection, 'disconnected by an administrator');
   await prisma.channelConnection.update({
     where: { id: connection.id },
     data: {
       status: 'disconnected',
       healthStatus: 'DISCONNECTED',
-      healthDetail: '',
+      healthDetail: release.released
+        ? ''
+        : release.error && release.error !== 'no stored credentials'
+          ? `Disconnected here, but the bot's webhook could not be deleted: ${release.error}`
+          : '',
       credentialsEncrypted: '',
       webhookSecret: '',
     },

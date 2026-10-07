@@ -3,9 +3,19 @@
   "configurations": [
     {
       "name": "dashboard",
-      "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "@app/dashboard", "dev"],
-      "port": 5173
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "--port", "5173"],
+      "cwd": "apps/dashboard",
+      "port": 5173,
+      "env": { "DEV_API_TARGET": "https://bot.avtomaktabturon.uz" }
+    },
+    {
+      "name": "dashboard-prod",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "preview", "--port", "4173", "--outDir", "../server/public/dashboard"],
+      "cwd": "apps/dashboard",
+      "port": 4173,
+      "env": { "DEV_API_TARGET": "https://bot.avtomaktabturon.uz" }
     }
   ]
 }

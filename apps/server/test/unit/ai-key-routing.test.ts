@@ -5,7 +5,7 @@
  * pin the three places that now refuse to be fooled by the slot and look at
  * the key itself — env vars, stored settings, and the per-run resolution.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { encryptSecret } from '../../src/lib/crypto.js';
 import { initLogger } from '../../src/lib/logger.js';
 import { initAI, getAIProvider, resolveProviderForModel } from '../../src/modules/ai/index.js';

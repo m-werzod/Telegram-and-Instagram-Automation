@@ -272,6 +272,53 @@ label.field .hint { color: var(--muted); font-size: 12px; margin-top: 4px; displ
 .login-submit:disabled { opacity: 0.6; cursor: not-allowed; box-shadow: none; }
 .login-footnote { text-align: center; color: #97a1b3; font-size: 12px; margin: 18px 0 0; display: flex; align-items: center; justify-content: center; gap: 6px; }
 
+/* ── Install as an app ──────────────────────────────────────────────────── */
+.login-install { display: flex; justify-content: center; margin-top: 16px; }
+.install-btn {
+  border: 1.5px dashed #c9d2e4; background: #fafbfd; color: #44506a; border-radius: 12px;
+  padding: 11px 16px; font-size: 13.5px; font-weight: 600; min-height: 44px; justify-content: center;
+}
+.install-btn:hover { border-color: var(--accent); color: var(--accent-dark); background: var(--accent-soft); }
+
+.nav-drawer .install-btn {
+  width: calc(100% - 20px); margin: 0 10px 4px; background: #161f35; border-color: #263252;
+  color: #c3cbdb;
+}
+.nav-drawer .install-btn:hover { background: #1a2440; color: #fff; border-color: var(--accent); }
+
+/* Bottom sheet — the iOS "Add to Home Screen" walkthrough. */
+.sheet-backdrop {
+  position: fixed; inset: 0; z-index: 120; background: rgba(8, 12, 24, 0.55);
+  display: flex; align-items: flex-end; justify-content: center; padding: 0;
+}
+.sheet {
+  background: var(--panel); width: 100%; max-width: 460px; border-radius: 20px 20px 0 0;
+  padding: 20px 20px calc(24px + env(safe-area-inset-bottom)); box-shadow: var(--shadow-lg);
+  animation: sheet-up 0.22s cubic-bezier(0.22, 0.85, 0.3, 1) both;
+}
+@keyframes sheet-up { from { transform: translateY(100%); } to { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .sheet { animation: none; } }
+@media (min-width: 600px) {
+  .sheet-backdrop { align-items: center; padding: 24px; }
+  .sheet { border-radius: var(--radius-lg); }
+}
+
+button.icon-only { border: none; background: none; padding: 7px; min-height: unset; color: var(--muted); }
+button.icon-only:hover { background: #eef1f5; border-color: transparent; }
+
+.install-steps { list-style: none; margin: 14px 0; padding: 0; counter-reset: step; }
+.install-steps li {
+  display: flex; align-items: flex-start; gap: 11px; padding: 11px 0;
+  border-bottom: 1px solid var(--border-soft); line-height: 1.6; font-size: 13.5px;
+}
+.install-steps li:last-child { border-bottom: none; }
+.install-steps li > span:not(.step-icon) { flex: 1; min-width: 0; }
+.install-steps .step-icon {
+  width: 30px; height: 30px; border-radius: 9px; flex-shrink: 0;
+  background: var(--accent-soft); color: var(--accent-dark);
+  display: flex; align-items: center; justify-content: center;
+}
+
 @keyframes login-shake {
   0%, 100% { transform: translateX(0); }
   20% { transform: translateX(-7px); } 40% { transform: translateX(7px); }
@@ -347,7 +394,11 @@ label.field .hint { color: var(--muted); font-size: 12px; margin-top: 4px; displ
 
 /* ── Misc ───────────────────────────────────────────────────────────────── */
 .steps { margin: 8px 0 0; padding-left: 22px; }
-.steps li { margin-bottom: 7px; line-height: 1.6; }
+/* These steps quote callback URLs and tokens — single unbreakable words long
+   enough to push the whole page sideways on a phone. */
+.steps li { margin-bottom: 7px; line-height: 1.6; overflow-wrap: anywhere; }
+.url-link { overflow-wrap: anywhere; }
+.url-link > svg { display: inline; vertical-align: -1px; }
 details.json { margin-top: 6px; }
 details.json summary { display: flex; align-items: center; gap: 5px; }
 details.json pre { background: #f3f5f8; padding: 10px; border-radius: 8px; overflow-x: auto; font-size: 12px; max-width: 100%; }
@@ -361,6 +412,139 @@ details.json pre { background: #f3f5f8; padding: 10px; border-radius: 8px; overf
 
 @keyframes spin { to { transform: rotate(360deg); } }
 .spin { animation: spin 0.8s linear infinite; }
+
+/* ── Connected-account cards (Ulanishlar, handover) ─────────────────────── */
+.account-line { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; margin: 10px 0 2px; }
+.account-name { font-size: 15.5px; font-weight: 700; letter-spacing: -0.2px; }
+.switch-warning {
+  display: flex; gap: 10px; align-items: flex-start; margin-top: 12px;
+  background: var(--warn-soft); border: 1px solid #f3e0bd; border-radius: var(--radius-sm);
+  padding: 12px 13px; font-size: 13px; line-height: 1.6; color: #6c4b08;
+}
+.switch-warning > svg { color: var(--warn); margin-top: 1px; }
+
+.stack { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.mini-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 10px 12px;
+}
+/* Makes the whole row the tap target instead of the line of text inside it. */
+.row-link { flex: 1; min-width: 0; color: inherit; display: block; padding: 2px 0; }
+.row-link:hover { text-decoration: none; }
+.row-link:hover .lead-name { color: var(--accent-dark); }
+
+/* ── Segmented control (channel tabs) ───────────────────────────────────── */
+.seg {
+  display: flex; gap: 4px; background: #e9edf4; border-radius: 12px; padding: 4px;
+  margin-bottom: 14px; overflow-x: auto; scrollbar-width: none;
+}
+.seg::-webkit-scrollbar { display: none; }
+.seg button {
+  flex: 1; justify-content: center; gap: 7px; border: none; background: none; color: var(--muted);
+  border-radius: 9px; font-size: 13.5px; font-weight: 600; min-height: 36px; white-space: nowrap;
+  padding: 7px 14px;
+}
+.seg button:hover { background: rgba(255,255,255,0.6); }
+.seg button.active { background: #fff; color: var(--text); box-shadow: var(--shadow-sm); }
+.seg-count {
+  background: #e3e8f0; color: var(--muted); border-radius: 20px; padding: 1px 7px;
+  font-size: 11.5px; font-weight: 700; min-width: 20px; text-align: center;
+}
+.seg button.active .seg-count { background: var(--accent-soft); color: var(--accent-dark); }
+
+/* ── Filter bar ─────────────────────────────────────────────────────────── */
+.filters { display: flex; gap: 10px; align-items: center; }
+.filters .search { flex: 1; min-width: 0; background: #fff; }
+.filters .search input { border: none; padding: 9px 0; box-shadow: none; min-height: unset; }
+.filters select { width: 190px; flex-shrink: 0; }
+
+.pager { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+
+/* ── Lead cards (CRM) ───────────────────────────────────────────────────── */
+.lead-list { display: flex; flex-direction: column; gap: 10px; }
+.lead-card {
+  display: block; color: inherit; border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 13px 14px; background: #fff; transition: border-color 0.12s, box-shadow 0.12s, transform 0.08s;
+}
+.lead-card:hover { text-decoration: none; border-color: #ccd5e8; box-shadow: var(--shadow-sm); }
+.lead-card:active { transform: scale(0.995); }
+
+.lead-top { display: flex; align-items: center; gap: 11px; }
+.lead-avatar {
+  width: 38px; height: 38px; border-radius: 12px; flex-shrink: 0;
+  background: var(--accent-soft); color: var(--accent-dark);
+  display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 15px;
+}
+.lead-id { flex: 1; min-width: 0; }
+.lead-name {
+  font-weight: 700; font-size: 14.5px; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.lead-handle { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lead-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.lead-score {
+  min-width: 30px; text-align: center; font-weight: 800; font-size: 13px; color: var(--accent-dark);
+  background: var(--accent-soft); border-radius: 8px; padding: 3px 7px;
+}
+
+.lead-facts { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; }
+.lead-facts .fact {
+  display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: #44506a;
+  min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.lead-facts .fact > svg { color: var(--muted-soft); }
+
+/* What the agent extracted from the conversation — visually separated from the
+   contact details above it, because this is inferred rather than stated. */
+.lead-collected {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 14px;
+  margin: 10px 0 0; padding: 10px 12px; background: #f7f9fc; border-radius: var(--radius-sm);
+}
+.lead-collected dt {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700;
+  color: var(--muted-soft);
+}
+.lead-collected dd { margin: 1px 0 0; font-size: 13px; color: var(--text); overflow-wrap: anywhere; }
+
+.lead-tags { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin-top: 10px; }
+
+/* A back link is the most-tapped control on a detail page; as bare text it is
+   a ~17px target sitting against the edge of the screen. */
+.back-link {
+  display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px 8px 8px;
+  margin: 0 0 4px -8px; border-radius: 10px; font-size: 13.5px; font-weight: 600; min-height: 40px;
+}
+.back-link:hover { background: var(--accent-soft); text-decoration: none; }
+
+/* ── User rows (team / handover) ────────────────────────────────────────── */
+.user-row { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 13px; }
+.user-row-head { display: flex; align-items: center; gap: 11px; }
+.user-row-actions { display: flex; gap: 8px; align-items: center; margin-top: 11px; }
+.user-row-actions input { flex: 1; min-width: 0; }
+.danger-label { display: none; }
+
+/* ── Key/value detail rows ──────────────────────────────────────────────── */
+/* Replaces a two-column <table> for record details: a table forces a minimum
+   width and lands the value off-screen on a phone, while this collapses to
+   label-over-value. */
+.kv { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 18px; }
+.kv > div { min-width: 0; }
+.kv dt, .kv .k {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700;
+  color: var(--muted-soft); margin-bottom: 3px;
+}
+.kv dd, .kv .v { margin: 0; font-size: 13.5px; overflow-wrap: anywhere; }
+.kv .v.empty { color: var(--muted-soft); }
+.kv > div.wide { grid-column: 1 / -1; }
+
+/* ── Conversation picker ────────────────────────────────────────────────── */
+.conv-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%;
+  border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 10px 12px;
+  background: #fff; text-align: left; margin-bottom: 8px;
+}
+.conv-item.active { border-color: var(--accent); background: var(--accent-soft); }
+.conv-item .conv-who { min-width: 0; font-size: 13px; }
 
 /* ═══════════════════════════════════════════════════════════════════════
    MOBILE — looks and behaves like a native app below 768px
@@ -447,9 +631,53 @@ details.json pre { background: #f3f5f8; padding: 10px; border-radius: 8px; overf
   .stat .label { font-size: 11px; }
 
   button, .btn { min-height: 42px; }
+  /* `button.small` is more specific than the `button` rule above, so without
+     this it keeps its 32px desktop height on a phone — and .small is what the
+     dense rows all over the CRM are built from. */
+  button.small { min-height: 38px; padding: 8px 13px; font-size: 13px; }
   input, textarea, select { min-height: 44px; font-size: 16px; } /* 16px prevents iOS auto-zoom */
 
   .login-card { padding: 30px 22px 22px; }
+
+  /* ── CRM on a phone ───────────────────────────────────────────────────── */
+  /* The filter row stacks: a 190px select beside a search box leaves the box
+     too narrow to read what you typed. */
+  .filters { flex-direction: column; align-items: stretch; }
+  .filters select { width: 100%; }
+  .seg { margin-bottom: 12px; }
+  .seg button { font-size: 13px; padding: 7px 10px; min-height: 40px; }
+
+  .lead-card { padding: 12px; border-radius: var(--radius-sm); }
+  .lead-avatar { width: 36px; height: 36px; font-size: 14px; }
+  .lead-name { font-size: 14.5px; }
+  /* Status badge over score rather than beside it — three things on one line
+     push the name into an ellipsis at 360px. */
+  .lead-right { flex-direction: column; align-items: flex-end; gap: 4px; }
+  .lead-facts { gap: 5px 12px; }
+  /* Two columns of extracted facts become two words per line on a phone. */
+  .lead-collected { grid-template-columns: 1fr; gap: 8px; }
+
+  .pager { gap: 8px; }
+  .pager .muted { font-size: 12.5px; }
+
+  /* Profile/qualification rows read as label-over-value instead of a table
+     that has to be scrolled sideways to see the value at all. */
+  .kv { grid-template-columns: 1fr; gap: 10px; }
+  .kv > div { border-bottom: 1px solid var(--border-soft); padding-bottom: 8px; }
+  .kv > div:last-child { border-bottom: none; padding-bottom: 0; }
+
+  .chat { max-height: none; }
+  .msg { max-width: 88%; }
+
+  .mini-row { flex-wrap: wrap; gap: 8px; }
+  .account-line { margin-top: 8px; }
+
+  /* A password field plus two buttons will not fit one phone line; stack them
+     and let the delete button say what it does rather than be a lone icon. */
+  .user-row-actions { flex-wrap: wrap; }
+  .user-row-actions input { flex: 1 0 100%; }
+  .user-row-actions .small { flex: 1; justify-content: center; }
+  .danger-label { display: inline; }
 }
 
 @media (max-width: 420px) {

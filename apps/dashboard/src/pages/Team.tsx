@@ -1,9 +1,18 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { UserPlus, Users as UsersIcon, Building2, Trash2, KeyRound, Save } from 'lucide-react';
-import { api, ApiError } from '../api';
+import { Link } from 'react-router-dom';
+import { UserPlus, Users as UsersIcon, Building2, Trash2, KeyRound, Save, Send, Smartphone } from 'lucide-react';
+import { api, ApiError, type Connection, type TelegramPersonalAccount } from '../api';
 import IconChip from '../components/IconChip';
 import QueryError from '../components/QueryError';
+import InstagramIcon from '../components/InstagramIcon';
+import ChannelAccountCard from '../components/ChannelAccountCard';
+import {
+  INSTAGRAM_SWITCH_HINT,
+  INSTAGRAM_TOKEN_HINT,
+  TELEGRAM_SWITCH_HINT,
+  TELEGRAM_TOKEN_HINT,
+} from './Connections';
 
 /**
  * Team and business identity — the handover screen.
@@ -58,6 +67,8 @@ export default function Team({ me }: { me: { id: string; role: string } }) {
 
       <BusinessCard business={business.data?.business} error={business.error} />
 
+      <OwnerAccounts />
+
       <div className="card">
         <h3>
           <IconChip icon={UsersIcon} tone="violet" size={26} /> Foydalanuvchilar
@@ -67,28 +78,19 @@ export default function Team({ me }: { me: { id: string; role: string } }) {
         ) : users.isLoading ? (
           <p className="muted">Yuklanmoqda…</p>
         ) : (
-          <div className="table-scroll">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Login</th>
-                  <th>Ism</th>
-                  <th>Rol</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {list.map((u) => (
-                  <UserRow
-                    key={u.id}
-                    user={u}
-                    isMe={u.id === me.id}
-                    lastAdmin={u.role === 'ADMIN' && admins <= 1}
-                    onChanged={() => qc.invalidateQueries({ queryKey: ['users'] })}
-                  />
-                ))}
-              </tbody>
-            </table>
+          /* Cards, not a table: four columns plus a password field and a delete
+             button is ~590px of row, which on a phone means scrolling sideways
+             to reach the controls. */
+          <div className="stack">
+            {list.map((u) => (
+              <UserRow
+                key={u.id}
+                user={u}
+                isMe={u.id === me.id}
+                lastAdmin={u.role === 'ADMIN' && admins <= 1}
+                onChanged={() => qc.invalidateQueries({ queryKey: ['users'] })}
+              />
+            ))}
           </div>
         )}
       </div>
@@ -101,11 +103,16 @@ export default function Team({ me }: { me: { id: string; role: string } }) {
         </h3>
         <ol style={{ paddingLeft: 20, margin: 0, lineHeight: 1.9 }}>
           <li>Yuqorida biznes nomini egasining nomiga o‘zgartiring.</li>
+          <li>
+            <strong>Avtomatlashtirilgan akkauntlar</strong> bo‘limida egasining Telegram botini va
+            Instagram akkauntini qo‘ying — sizning akkauntlaringiz avtomatlashtirishdan shu zahoti
+            chiqadi, agentlar va bilimlar bazasi esa joyida qoladi.
+          </li>
           <li>Egasiga <strong>Administrator</strong> rolida hisob oching.</li>
           <li>U o‘z hisobi bilan kirib ko‘rsin — ishlayotganiga ishonch hosil qiling.</li>
           <li>
-            U <strong>Ulanishlar</strong> sahifasida o‘z Telegram botini va Instagram akkauntini
-            ulasin, <strong>Bilimlar bazasi</strong>ga o‘z ma’lumotlarini kiritsin.
+            U <strong>Bilimlar bazasi</strong>ga o‘z ma’lumotlarini kiritsin va{' '}
+            <strong>AI Agentlar</strong> bo‘limida har bir kanalning ko‘rsatmasini o‘ziga moslasin.
           </li>
           <li>Oxirida — egasi o‘z hisobidan turib sizning hisobingizni o‘chiradi.</li>
         </ol>
@@ -115,6 +122,130 @@ export default function Team({ me }: { me: { id: string; role: string } }) {
         </p>
       </div>
     </div>
+  );
+}
+
+/**
+ * The Instagram and Telegram accounts this platform is automating, and the
+ * control that moves the automation to someone else's.
+ *
+ * This is the half of a handover that has nothing to do with dashboard logins:
+ * the new owner does not get a seat next to the installer's accounts, they get
+ * their OWN accounts automated and the installer's cut off. The agents, their
+ * per-channel instructions, the knowledge base and the whole CRM history belong
+ * to the business and survive the swap untouched.
+ */
+function OwnerAccounts() {
+  const qc = useQueryClient();
+  const connections = useQuery({
+    queryKey: ['connections'],
+    queryFn: () => api.get<{ connections: Connection[] }>('/api/connections'),
+  });
+  const personal = useQuery({
+    queryKey: ['telegram-personal-accounts'],
+    queryFn: () =>
+      api.get<{ accounts: TelegramPersonalAccount[] }>('/api/telegram-personal-accounts'),
+  });
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ['connections'] });
+    qc.invalidateQueries({ queryKey: ['telegram-personal-accounts'] });
+  };
+
+  const instagram = connections.data?.connections?.find((c) => c.channel === 'INSTAGRAM');
+  const telegram = connections.data?.connections?.find((c) => c.channel === 'TELEGRAM');
+  const accounts = personal.data?.accounts ?? [];
+
+  return (
+    <>
+      <div className="card">
+        <h3>
+          <IconChip icon={Smartphone} tone="pink" size={26} /> Avtomatlashtirilgan akkauntlar
+        </h3>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Hozir qaysi Instagram va Telegram akkaunti avtomatlashtirilganini shu yerda ko‘rasiz va
+          shu yerdan boshqasiga almashtirasiz. Almashtirganda eski akkaunt avtomatlashtirishdan
+          <strong> uziladi</strong>; agentlar, ko‘rsatmalar, bilimlar bazasi va mijozlar tarixi
+          biznesga tegishli bo‘lib qoladi.
+        </p>
+        {connections.isError ? (
+          <QueryError error={connections.error} onRetry={() => connections.refetch()} />
+        ) : connections.isLoading ? (
+          <p className="muted" style={{ marginBottom: 0 }}>Yuklanmoqda…</p>
+        ) : null}
+      </div>
+
+      <ChannelAccountCard
+        title="Instagram"
+        icon={InstagramIcon}
+        iconTone="pink"
+        channel="instagram"
+        connection={instagram}
+        isAdmin
+        compact
+        onChanged={refresh}
+        tokenLabel="Yangi Instagram access token"
+        tokenHint={INSTAGRAM_TOKEN_HINT}
+        switchHint={INSTAGRAM_SWITCH_HINT}
+      />
+
+      <ChannelAccountCard
+        title="Telegram bot"
+        icon={Send}
+        iconTone="cyan"
+        channel="telegram"
+        connection={telegram}
+        isAdmin
+        compact
+        onChanged={refresh}
+        tokenLabel="Yangi bot tokeni"
+        tokenHint={TELEGRAM_TOKEN_HINT}
+        switchHint={TELEGRAM_SWITCH_HINT}
+      />
+
+      <div className="card">
+        <h3>
+          <IconChip icon={Send} tone="cyan" size={26} /> Shaxsiy Telegram akkaunt
+        </h3>
+        {accounts.length === 0 ? (
+          <p className="muted" style={{ marginBottom: 0 }}>
+            Hali shaxsiy akkaunt ulanmagan. Egasi o‘z telefonida Telegram → Sozlamalar →{' '}
+            <strong>Chat Automation</strong> bo‘limida yuqoridagi botni tanlasa, u shu yerda
+            avtomatik paydo bo‘ladi — token kiritish kerak emas.
+          </p>
+        ) : (
+          <>
+            <div className="stack">
+              {accounts.map((a) => (
+                <div key={a.id} className="mini-row">
+                  <div>
+                    <strong>{a.ownerUsername ? `@${a.ownerUsername}` : a.ownerName}</strong>
+                    <div className="muted" style={{ fontSize: 12 }}>
+                      {a.displayName || a.ownerName}
+                    </div>
+                  </div>
+                  <span className={`badge ${a.enabled && a.canReply ? 'ok' : 'warn'}`}>
+                    {!a.isEnabled
+                      ? 'EGASI UZDI'
+                      : !a.canReply
+                        ? "FAQAT O'QISH"
+                        : a.enabled
+                          ? 'AVTOMATIK'
+                          : "O'CHIRILGAN"}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <p className="muted" style={{ fontSize: 12.5 }}>
+              Botni almashtirsangiz bu ro‘yxat tozalanadi — eski botning ulanishlari yangi botga
+              o‘tmaydi.
+            </p>
+            <Link to="/telegram" className="btn small">
+              <Send size={13} /> Telegram sahifasida boshqarish
+            </Link>
+          </>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -277,54 +408,56 @@ function UserRow({
   });
 
   return (
-    <tr>
-      <td>
-        <strong>{user.username}</strong>
-        {isMe && <span className="badge accent" style={{ marginLeft: 8 }}>SIZ</span>}
-      </td>
-      <td>{user.name}</td>
-      <td>
+    <div className="user-row">
+      <div className="user-row-head">
+        <span className="lead-avatar">{(user.name || user.username)[0]?.toUpperCase() ?? '?'}</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="lead-name">
+            {user.name}
+            {isMe && <span className="badge accent" style={{ marginLeft: 8 }}>SIZ</span>}
+          </div>
+          <div className="lead-handle">@{user.username}</div>
+        </div>
         <span className={`badge ${user.role === 'ADMIN' ? 'ok' : ''}`}>
           {user.role === 'ADMIN' ? 'ADMINISTRATOR' : 'OPERATOR'}
         </span>
-      </td>
-      <td>
-        <div className="row" style={{ gap: 6 }}>
-          <input
-            type="text"
-            value={password}
-            placeholder="yangi parol"
-            style={{ width: 150 }}
-            onChange={(e) => { setPassword(e.target.value); setNote(''); }}
-          />
-          <button
-            className="small"
-            disabled={password.length < 8 || update.isPending}
-            onClick={() => update.mutate({ password })}
-          >
-            <KeyRound size={13} />
-            O‘zgartirish
-          </button>
-          <button
-            className="small danger"
-            disabled={isMe || lastAdmin || remove.isPending}
-            title={
-              isMe
-                ? 'O‘z hisobingizni o‘chira olmaysiz'
-                : lastAdmin
-                  ? 'Oxirgi administratorni o‘chirib bo‘lmaydi'
-                  : 'O‘chirish'
-            }
-            onClick={() => {
-              if (confirm(`"${user.username}" hisobini o‘chirilsinmi?`)) remove.mutate();
-            }}
-          >
-            <Trash2 size={13} />
-          </button>
-        </div>
-        {error && <div className="error-text" style={{ fontSize: 12 }}>{error}</div>}
-        {note && <p className="success-text" style={{ fontSize: 12, margin: '4px 0 0' }}>{note}</p>}
-      </td>
-    </tr>
+      </div>
+
+      <div className="user-row-actions">
+        <input
+          type="text"
+          value={password}
+          placeholder="yangi parol (kamida 8 ta belgi)"
+          onChange={(e) => { setPassword(e.target.value); setNote(''); }}
+        />
+        <button
+          className="small"
+          disabled={password.length < 8 || update.isPending}
+          onClick={() => update.mutate({ password })}
+        >
+          <KeyRound size={13} />
+          O‘zgartirish
+        </button>
+        <button
+          className="small danger"
+          disabled={isMe || lastAdmin || remove.isPending}
+          title={
+            isMe
+              ? 'O‘z hisobingizni o‘chira olmaysiz'
+              : lastAdmin
+                ? 'Oxirgi administratorni o‘chirib bo‘lmaydi'
+                : 'O‘chirish'
+          }
+          onClick={() => {
+            if (confirm(`"${user.username}" hisobini o‘chirilsinmi?`)) remove.mutate();
+          }}
+        >
+          <Trash2 size={13} />
+          <span className="danger-label">O‘chirish</span>
+        </button>
+      </div>
+      {error && <div className="error-text" style={{ fontSize: 12 }}>{error}</div>}
+      {note && <p className="success-text" style={{ fontSize: 12, margin: '4px 0 0' }}>{note}</p>}
+    </div>
   );
 }

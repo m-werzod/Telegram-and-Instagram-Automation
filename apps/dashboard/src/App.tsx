@@ -8,6 +8,7 @@ import IconChip from './components/IconChip';
 import BrandLogo from './components/BrandLogo';
 import SplashScreen from './components/SplashScreen';
 import ErrorBoundary from './components/ErrorBoundary';
+import InstallAppButton from './components/InstallAppButton';
 import Login from './pages/Login';
 import Overview from './pages/Overview';
 import Agents from './pages/Agents';
@@ -201,6 +202,10 @@ function Shell({
             </NavLink>
           ))}
         </div>
+        {/* Renders nothing once installed, or where installing is impossible —
+            a signed-in phone user would otherwise have to sign out to find
+            this, since the only other copy lives on the login screen. */}
+        <InstallAppButton />
         <UserCard user={user} onLogout={onLogout} />
       </nav>
 

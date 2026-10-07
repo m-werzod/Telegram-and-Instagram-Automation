@@ -22,6 +22,21 @@ const queryClient = new QueryClient({
   }),
 });
 
+/**
+ * Register the service worker — what makes the dashboard installable as a
+ * phone app. Dev is skipped on purpose: a worker caching Vite's module graph
+ * serves stale modules after every edit.
+ *
+ * Failure here is never fatal. The app works fine uninstalled, so a browser
+ * that refuses the worker (private mode, an unsupported browser, an http://
+ * origin) just loses the install option.
+ */
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  window.addEventListener('load', () => {
+    void navigator.serviceWorker.register('/sw.js').catch(() => undefined);
+  });
+}
+
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ErrorBoundary>

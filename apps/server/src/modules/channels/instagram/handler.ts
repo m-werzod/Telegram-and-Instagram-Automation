@@ -8,6 +8,7 @@ import { isTrivialComment, parseAgentSettings } from '../../engine/business-rule
 import { runAgentPipeline } from '../../engine/pipeline.js';
 import { getMediaAssetWithData, publicMediaUrl } from '../../media/service.js';
 import { claimIdempotency, releaseIdempotency } from '../shared/idempotency.js';
+import type { InstagramClient } from './client.js';
 import { getInstagramClient } from './service.js';
 
 /**

@@ -30,6 +30,7 @@ const MODEL_METHODS = [
   'deleteMany',
   'count',
   'aggregate',
+  'groupBy',
 ] as const;
 
 export type MockModel = Record<(typeof MODEL_METHODS)[number], AnyFn> & Record<string, AnyFn>;
@@ -76,7 +77,10 @@ export function mockPrisma(): MockPrisma {
       get(target, prop: string) {
         if (!(prop in target)) {
           target[prop] = vi.fn().mockImplementation(async () => {
-            if (prop === 'findMany') return [];
+            // Prisma's list-shaped reads never resolve to null; defaulting them
+            // to one would make callers crash on .find/.map instead of seeing an
+            // empty result.
+            if (prop === 'findMany' || prop === 'groupBy') return [];
             if (prop === 'count') return 0;
             if (prop === 'aggregate') return { _avg: {} };
             if (prop.startsWith('update') || prop.startsWith('delete')) return { count: 0 };

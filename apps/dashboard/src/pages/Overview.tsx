@@ -77,11 +77,15 @@ export default function Overview() {
         <div className="card">
           <h3><IconChip icon={Bot} tone="violet" size={26} /> AI Agentlar</h3>
           {agents.data?.agents?.map((a) => (
-            <div className="row between" key={a.id} style={{ padding: '7px 0' }}>
-              <div>
-                <Link to={`/agents/${a.id}`}>{a.name}</Link>
-                <div className="muted" style={{ fontSize: 12 }}>{a.type.replaceAll('_', ' ').toLowerCase()}</div>
-              </div>
+            <div className="mini-row" key={a.id} style={{ marginBottom: 8 }}>
+              {/* The whole name block is the link, so the tap target is the row
+                  height rather than the 18px of text inside it. */}
+              <Link to={`/agents/${a.id}`} className="row-link">
+                <div className="lead-name">{a.name}</div>
+                <div className="muted" style={{ fontSize: 12 }}>
+                  {a.type.replaceAll('_', ' ').toLowerCase()}
+                </div>
+              </Link>
               <AgentToggle agent={a} />
             </div>
           ))}
@@ -92,8 +96,8 @@ export default function Overview() {
             <p className="muted">Hali hech qanday kanal ulanmagan — <Link to="/connections">Ulanishlar</Link> bo'limiga o'ting.</p>
           )}
           {connections.data?.connections?.map((c) => (
-            <div className="row between" key={c.id} style={{ padding: '7px 0' }}>
-              <div>
+            <div className="mini-row" key={c.id} style={{ marginBottom: 8 }}>
+              <div style={{ minWidth: 0 }}>
                 <strong>{c.channel === 'INSTAGRAM' ? 'Instagram' : 'Telegram'}</strong>{' '}
                 <span className="muted">{c.displayName}</span>
               </div>
