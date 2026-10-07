@@ -273,18 +273,26 @@ label.field .hint { color: var(--muted); font-size: 12px; margin-top: 4px; displ
 .login-footnote { text-align: center; color: #97a1b3; font-size: 12px; margin: 18px 0 0; display: flex; align-items: center; justify-content: center; gap: 6px; }
 
 /* ── Install as an app ──────────────────────────────────────────────────── */
-.login-install { display: flex; justify-content: center; margin-top: 16px; }
-.install-btn {
-  border: 1.5px dashed #c9d2e4; background: #fafbfd; color: #44506a; border-radius: 12px;
-  padding: 11px 16px; font-size: 13.5px; font-weight: 600; min-height: 44px; justify-content: center;
+/* Login page: pinned to the top-right of the viewport, above the card, so it
+   is visible before anything is typed and does not move with the form. */
+.install-corner {
+  position: absolute; top: 16px; right: 16px; z-index: 5;
+  border: 1px solid rgba(255, 255, 255, 0.22); background: rgba(255, 255, 255, 0.1);
+  color: #e8edf7; border-radius: 999px; padding: 9px 15px; font-size: 13px; font-weight: 600;
+  min-height: 40px; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
 }
-.install-btn:hover { border-color: var(--accent); color: var(--accent-dark); background: var(--accent-soft); }
+.install-corner:hover { background: rgba(255, 255, 255, 0.18); border-color: rgba(255, 255, 255, 0.4); }
+.install-corner:active { transform: scale(0.97); }
 
-.nav-drawer .install-btn {
-  width: calc(100% - 20px); margin: 0 10px 4px; background: #161f35; border-color: #263252;
-  color: #c3cbdb;
+/* Dashboard: the top bar on a phone, the sidebar brand row on desktop. */
+.install-topbar {
+  border: none; background: none; color: inherit; padding: 9px; border-radius: 9px;
+  min-height: unset; flex-shrink: 0;
 }
-.nav-drawer .install-btn:hover { background: #1a2440; color: #fff; border-color: var(--accent); }
+.install-topbar .install-label { display: none; }
+.topbar .install-topbar:hover { background: #1a2440; color: #fff; }
+.sidebar .brand .install-topbar { margin-left: auto; color: #8a95a3; }
+.sidebar .brand .install-topbar:hover { background: #161f35; color: #fff; }
 
 /* Bottom sheet — the iOS "Add to Home Screen" walkthrough. */
 .sheet-backdrop {
@@ -638,6 +646,9 @@ details.json pre { background: #f3f5f8; padding: 10px; border-radius: 8px; overf
   input, textarea, select { min-height: 44px; font-size: 16px; } /* 16px prevents iOS auto-zoom */
 
   .login-card { padding: 30px 22px 22px; }
+  /* Leave room above the card so the corner button never overlaps the logo. */
+  .login-page { padding-top: 68px; }
+  .install-corner { top: 12px; right: 12px; padding: 9px 13px; font-size: 12.5px; }
 
   /* ── CRM on a phone ───────────────────────────────────────────────────── */
   /* The filter row stacks: a 190px select beside a search box leaves the box
@@ -682,4 +693,11 @@ details.json pre { background: #f3f5f8; padding: 10px; border-radius: 8px; overf
 
 @media (max-width: 420px) {
   .grid.cols-4 { grid-template-columns: 1fr 1fr; }
+}
+
+/* Below ~360px the label and the card's own padding start to fight; the icon
+   alone still reads as "install" and keeps a 40px target. */
+@media (max-width: 359px) {
+  .install-corner .install-label { display: none; }
+  .install-corner { padding: 10px; border-radius: 12px; }
 }

@@ -158,6 +158,7 @@ function Shell({
         <div className="brand">
           <BrandLogo size={34} />
           Turon AI Platforma
+          <InstallAppButton variant="topbar" />
         </div>
         <div className="nav-list">
           {items.map((n) => (
@@ -179,6 +180,8 @@ function Shell({
           <BrandLogo size={28} />
           Turon AI
         </div>
+        {/* Renders nothing once the app is installed. */}
+        <InstallAppButton variant="topbar" />
         <span className="avatar">{initials(user.name || user.username)}</span>
       </div>
 
@@ -202,10 +205,6 @@ function Shell({
             </NavLink>
           ))}
         </div>
-        {/* Renders nothing once installed, or where installing is impossible —
-            a signed-in phone user would otherwise have to sign out to find
-            this, since the only other copy lives on the login screen. */}
-        <InstallAppButton />
         <UserCard user={user} onLogout={onLogout} />
       </nav>
 

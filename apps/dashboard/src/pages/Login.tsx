@@ -30,6 +30,10 @@ export default function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
       <div className="login-glow login-glow-a" aria-hidden />
       <div className="login-glow login-glow-b" aria-hidden />
 
+      {/* Top-right of the page, above the card — the first thing visible on a
+          phone, and not something you have to scroll the form to find. */}
+      <InstallAppButton variant="corner" />
+
       <form className={`login-card${error ? ' shake' : ''}`} onSubmit={submit}>
         <div className="login-brand">
           <BrandLogo size={72} className="login-mark" />
@@ -86,10 +90,6 @@ export default function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
         <button className="login-submit" disabled={busy || !loginName || !password} type="submit">
           {busy ? 'Kirilmoqda…' : 'Kirish'}
         </button>
-
-        <div className="login-install">
-          <InstallAppButton />
-        </div>
 
         <p className="login-footnote">
           <ShieldCheck size={13} strokeWidth={2} />
