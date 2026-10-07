@@ -314,6 +314,33 @@ label.field .hint { color: var(--muted); font-size: 12px; margin-top: 4px; displ
 button.icon-only { border: none; background: none; padding: 7px; min-height: unset; color: var(--muted); }
 button.icon-only:hover { background: #eef1f5; border-color: transparent; }
 
+/* The "Chrome is getting ready" block — the wait made visible, so it reads as
+   a working flow rather than a button that did nothing. */
+.install-waiting {
+  display: flex; gap: 11px; align-items: flex-start; margin-top: 12px;
+  background: var(--accent-soft); border: 1px solid #d5ddfb; border-radius: var(--radius-sm);
+  padding: 12px 13px; font-size: 13px; line-height: 1.55;
+}
+.install-waiting > svg { color: var(--accent-dark); margin-top: 1px; }
+
+/* The real install trigger, once the browser hands it over. */
+.install-go {
+  width: 100%; justify-content: center; margin-top: 14px; min-height: 50px;
+  font-size: 15.5px; font-weight: 700;
+}
+
+.install-diag { margin-top: 14px; }
+.install-diag summary {
+  cursor: pointer; font-size: 12px; color: var(--muted-soft); list-style: none;
+}
+.install-diag summary::-webkit-details-marker { display: none; }
+.install-diag summary::before { content: '▸ '; }
+.install-diag[open] summary::before { content: '▾ '; }
+.install-diag .mono {
+  margin-top: 7px; background: #f3f5f8; border-radius: 8px; padding: 9px 11px;
+  font-size: 11.5px; color: var(--muted); line-height: 1.7;
+}
+
 .install-steps { list-style: none; margin: 14px 0; padding: 0; counter-reset: step; }
 .install-steps li {
   display: flex; align-items: flex-start; gap: 11px; padding: 11px 0;
