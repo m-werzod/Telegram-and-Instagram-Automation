@@ -169,15 +169,44 @@ export async function releaseInstagramAccount(
 ): Promise<{ released: boolean; error: string | null }> {
   const log = childLogger({ module: 'instagram', tenantId: connection.tenantId });
   if (!connection.credentialsEncrypted) return { released: false, error: 'no stored credentials' };
+
+  let released = false;
+  let error: string | null = null;
   try {
     await getInstagramClient(connection).unsubscribeApps();
+    released = true;
     log.info({ account: connection.displayName, reason }, 'instagram account released');
-    return { released: true, error: null };
   } catch (err) {
-    const error = errorMessage(err);
+    error = errorMessage(err);
     log.warn({ account: connection.displayName, reason, err: error }, 'could not release instagram account');
-    return { released: false, error };
   }
+
+  // Raised whether or not the unsubscribe worked, because it is a different
+  // thing: unsubscribing stops webhook DELIVERY, it does not revoke the access
+  // token this platform still holds for that account. Only the account's owner
+  // can do that, in Instagram's own settings — there is no API for an app to
+  // revoke an Instagram-Login grant on a user's behalf. A handover that skips
+  // it leaves the previous owner's account still reachable by this app until
+  // the 60-day token lapses.
+  await upsertManualAction(connection.tenantId, {
+    dedupKey: `ig-revoke-${connection.externalAccountId}`,
+    platform: 'Instagram',
+    title: `Revoke this platform's access on the previous account ${connection.displayName}`,
+    officialUrl: 'https://www.instagram.com/accounts/manage_access_tools/',
+    steps: [
+      released
+        ? `Webhook delivery for ${connection.displayName} has been switched off from here, so no new comments or DMs from it reach this platform.`
+        : `Webhook delivery for ${connection.displayName} could NOT be switched off from here (${error}). Until the step below is done, Meta may keep delivering that account's events to this server — they are discarded, but the subscription is still live.`,
+      'The stored access token has been discarded, but only the account owner can revoke the app grant itself.',
+      `On the phone signed in as ${connection.displayName}: Instagram app → Settings and privacy → Apps and websites (or Website permissions) → Active.`,
+      'Find this platform in the list and press Remove.',
+      'If the account is also managed in Meta Business Suite, check Business settings → Integrations → Connected apps as well.',
+    ],
+    expectedResult: `This platform no longer appears under Apps and websites for ${connection.displayName}, and that account is fully detached from the automation.`,
+    whatToReturn: 'Nothing — mark this done once the app no longer appears in that list.',
+  }).catch(() => undefined);
+
+  return { released, error };
 }
 
 export async function createMetaManualActions(tenantId: string): Promise<void> {

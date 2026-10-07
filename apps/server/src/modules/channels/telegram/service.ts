@@ -65,8 +65,36 @@ export async function connectTelegram(tenantId: string, botToken: string): Promi
     // Business connections belong to the OLD bot. Left in place they would
     // show the previous owner's personal account on the new owner's dashboard
     // and fail every health check against a bot that never issued them.
+    const previousAccounts = await prisma.telegramPersonalAccount.findMany({
+      where: { tenantId },
+      select: { ownerUsername: true, ownerName: true },
+    });
     const dropped = await prisma.telegramPersonalAccount.deleteMany({ where: { tenantId } });
     droppedPersonalAccounts = dropped.count;
+
+    if (previousAccounts.length > 0) {
+      // Deleting the row forgets the connection; it does not end it. The link
+      // between a personal account and the old bot lives on Telegram's side
+      // and only its owner can remove it — until they do, the old bot still
+      // has reply permission on their chats.
+      const owners = previousAccounts
+        .map((a) => (a.ownerUsername ? `@${a.ownerUsername}` : a.ownerName))
+        .join(', ');
+      await upsertManualAction(tenantId, {
+        dedupKey: `telegram-business-disconnect-${existing!.externalAccountId}`,
+        platform: 'Telegram',
+        title: `Disconnect ${existing!.displayName} from the previous personal account (${owners})`,
+        officialUrl: 'https://core.telegram.org/bots/features#business-bots',
+        steps: [
+          `The platform has stopped listening to ${existing!.displayName} and forgotten its connections, but the bot still holds "reply to messages" permission on ${owners} until that is removed in Telegram itself.`,
+          `On the phone signed in as ${owners}: Telegram → Settings → "Chat Automation" (on Telegram Business/Premium accounts: Settings → Telegram Business → Chatbots).`,
+          `Remove ${existing!.displayName} as the connected bot.`,
+          'The new owner then selects the NEW bot on their own phone, on that same screen.',
+        ],
+        expectedResult: `${existing!.displayName} no longer appears under Chat Automation for ${owners}, and the new bot appears there for the new owner instead.`,
+        whatToReturn: 'Nothing — the dashboard picks up the new connection by itself once the new owner selects the bot.',
+      }).catch(() => undefined);
+    }
   }
   const metadata = {
     // A bot swap starts from a clean slate: the old bot's webhook URL, channel

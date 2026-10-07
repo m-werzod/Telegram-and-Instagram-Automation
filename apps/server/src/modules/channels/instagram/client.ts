@@ -167,6 +167,14 @@ export class InstagramClient {
    * Stop webhook delivery for this account. Needed when the platform is moved
    * to a different Instagram account: a subscription left behind keeps Meta
    * POSTing the previous owner's comments and DMs to this server forever.
+   *
+   * DELETE is the documented inverse of the subscribed_apps edge on the Graph
+   * API generally, but Meta's Instagram-with-Instagram-Login pages document
+   * only the POST. So the caller treats a failure here as expected-possible
+   * rather than exceptional, and the owner-side revocation step is raised as a
+   * manual action either way — removing the app in Instagram's own settings is
+   * the only action that actually revokes the token, and no API can do it for
+   * the account's owner.
    */
   unsubscribeApps(): Promise<{ success?: boolean }> {
     return this.request('DELETE', `/me/subscribed_apps`);

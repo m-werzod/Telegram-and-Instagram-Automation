@@ -231,6 +231,33 @@ describe('switching the automated Telegram bot', () => {
     expect(oldBotCalls).toHaveLength(0);
   });
 
+  // Deleting the row forgets the connection; it does not end it. The bot keeps
+  // reply permission on the previous owner's chats until they remove it.
+  it('tells the previous owner to disconnect the old bot in Chat Automation', async () => {
+    prisma.telegramPersonalAccount.findMany.mockResolvedValue([
+      { ownerUsername: 'WerzodUsmanov', ownerName: 'Sherzod' },
+    ]);
+
+    await connectTelegram('tenant-1', NEW_BOT_TOKEN);
+
+    const action = prisma.manualAction.upsert.mock.calls
+      .map((c) => (c[0] as { create: { dedupKey: string; steps: string[]; title: string } }).create)
+      .find((a) => a.dedupKey.startsWith('telegram-business-disconnect'));
+    expect(action).toBeDefined();
+    expect(action!.title).toContain('@WerzodUsmanov');
+    expect(action!.steps.join(' ')).toMatch(/Chat Automation/);
+  });
+
+  it('raises no disconnect task when no personal account was connected', async () => {
+    prisma.telegramPersonalAccount.findMany.mockResolvedValue([]);
+    await connectTelegram('tenant-1', NEW_BOT_TOKEN);
+
+    const keys = prisma.manualAction.upsert.mock.calls.map(
+      (c) => (c[0] as { create: { dedupKey: string } }).create.dedupKey,
+    );
+    expect(keys.some((k) => k.startsWith('telegram-business-disconnect'))).toBe(false);
+  });
+
   it('deletes the webhook when an administrator disconnects', async () => {
     await disconnectTelegram('tenant-1');
 
@@ -347,6 +374,43 @@ describe('switching the automated Instagram account', () => {
     };
     expect(upsert.update.metadata.previousAccount.released).toBe(false);
     expect(upsert.update.metadata.previousAccount.error).toMatch(/OAuth|190|401/);
+  });
+
+  // Unsubscribing stops DELIVERY; it does not revoke the token this platform
+  // holds. Only the account's owner can do that, and no API can do it for them
+  // — so the step is raised whether or not the unsubscribe itself worked.
+  it('tells the previous owner to revoke app access, even on a clean release', async () => {
+    await connectInstagram('tenant-1', 'IGNEWTOKEN0000000000');
+
+    const action = prisma.manualAction.upsert.mock.calls
+      .map((c) => (c[0] as { create: { dedupKey: string; steps: string[]; title: string } }).create)
+      .find((a) => a.dedupKey === 'ig-revoke-900900');
+    expect(action).toBeDefined();
+    expect(action!.title).toContain('@old_account');
+    expect(action!.steps.join(' ')).toMatch(/Apps and websites/);
+  });
+
+  it('says the subscription is still live when the unsubscribe failed', async () => {
+    fetchMock.mockImplementation(async (input: unknown, init?: { method?: string }) => {
+      const url = String(input);
+      if (url.endsWith('/api/health')) return json({ status: 'ok', db: 'ok' });
+      const auth = (init as { headers?: Record<string, string> })?.headers?.authorization;
+      if (auth === 'Bearer IGOLDTOKEN0000000000') {
+        return json({ error: { message: 'Unsupported delete request', code: 100 } }, 400);
+      }
+      if (/\/me($|\?)/.test(url)) {
+        return json({ user_id: '800800', username: 'new_account', account_type: 'BUSINESS' });
+      }
+      return json({ success: true });
+    });
+
+    await connectInstagram('tenant-1', 'IGNEWTOKEN0000000000');
+
+    const action = prisma.manualAction.upsert.mock.calls
+      .map((c) => (c[0] as { create: { dedupKey: string; steps: string[] } }).create)
+      .find((a) => a.dedupKey === 'ig-revoke-900900');
+    expect(action!.steps[0]).toMatch(/could NOT be switched off/);
+    expect(action!.steps[0]).toMatch(/Unsupported delete request|100/);
   });
 
   it('unsubscribes before discarding the token on disconnect', async () => {
