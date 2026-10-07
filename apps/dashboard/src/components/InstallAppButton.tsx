@@ -38,7 +38,7 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
 }
 
-type Platform = 'ios-safari' | 'ios-other' | 'android' | 'in-app' | 'desktop';
+type Platform = 'ios-safari' | 'ios-other' | 'android' | 'in-app-android' | 'in-app-ios' | 'desktop';
 
 /** Chrome's documented engagement delay before it offers the prompt. */
 const ENGAGEMENT_SECONDS = 30;
@@ -49,12 +49,19 @@ function detectPlatform(): Platform {
   const ios = /iPad|iPhone|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
   const android = /Android/.test(ua);
 
-  // Webviews embedded in other apps. Named ones first; then iOS WKWebView,
-  // which is recognisable because a real iOS browser always carries one of
-  // these tokens and an embedded one usually carries none.
+  // Webviews embedded in other apps. Nothing can be installed from one, by
+  // anyone — so misreading a webview as a real browser is the worst mistake
+  // this function can make: it promises an install that will never arrive.
+  //
+  // Telegram's in-app browser on Android is the case that matters here, and it
+  // names neither itself nor an app. It is an Android WebView, which Google
+  // marks with "; wv)" in the platform token — and, since the UA reduction
+  // dropped that token on some builds, with "Version/4.0", which Chrome for
+  // Android has never sent.
   const namedInApp = /Instagram|FBAN|FBAV|FB_IAB|Line\/|MicroMessenger|BytedanceWebview|TikTok/.test(ua);
+  const androidWebview = android && (/;\s*wv\)/.test(ua) || /Version\/\d+\.\d+\s+Chrome/.test(ua));
   const iosWebview = ios && !/Safari/.test(ua) && !/CriOS|FxiOS|EdgiOS/.test(ua);
-  if (namedInApp || iosWebview) return 'in-app';
+  if (namedInApp || androidWebview || iosWebview) return ios ? 'in-app-ios' : 'in-app-android';
 
   if (ios) return /CriOS|FxiOS|EdgiOS/.test(ua) ? 'ios-other' : 'ios-safari';
   if (android) return 'android';
@@ -69,6 +76,17 @@ function isStandalone(): boolean {
   );
 }
 
+/**
+ * Android intent URL that reopens this page in Chrome itself. This is the only
+ * reliable escape from an in-app WebView, where nothing can ever be installed.
+ * `browser_fallback_url` covers a phone without Chrome.
+ */
+function chromeIntentUrl(): string {
+  const https = window.location.href;
+  const bare = https.replace(/^https?:\/\//, '');
+  return `intent://${bare}#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(https)};end`;
+}
+
 /** Platforms where waiting for Chrome's prompt is worth doing at all. */
 function canAutoInstall(platform: Platform): boolean {
   return platform === 'android' || platform === 'desktop';
@@ -79,12 +97,52 @@ interface Step {
   text: React.ReactNode;
 }
 
+/**
+ * A phone with the one control to press marked on it. Words alone kept failing
+ * — "the Share button at the bottom" means nothing if you have never noticed
+ * it — so the sheet shows where to look.
+ */
+function PhoneDiagram({ spot }: { spot: 'bottom' | 'top-right' }) {
+  const bottom = spot === 'bottom';
+  return (
+    <svg className="phone-diagram" viewBox="0 0 120 200" role="img" aria-hidden>
+      <rect x="10" y="6" width="100" height="188" rx="14" fill="var(--panel)" stroke="var(--border)" strokeWidth="2" />
+      <rect x="18" y="22" width="84" height="150" rx="4" fill="#f3f5f8" />
+      {/* the page, suggested */}
+      <rect x="26" y="36" width="68" height="6" rx="3" fill="#dfe4ec" />
+      <rect x="26" y="50" width="52" height="6" rx="3" fill="#e7ebf2" />
+      <rect x="26" y="64" width="60" height="6" rx="3" fill="#e7ebf2" />
+      {bottom ? (
+        <>
+          <circle cx="60" cy="180" r="15" fill="var(--accent-soft)" stroke="var(--accent)" strokeWidth="2" />
+          {/* iOS share glyph */}
+          <path d="M60 173v11" stroke="var(--accent-dark)" strokeWidth="2" strokeLinecap="round" />
+          <path d="M56 177l4-4 4 4" fill="none" stroke="var(--accent-dark)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M54 181v5h12v-5" fill="none" stroke="var(--accent-dark)" strokeWidth="2" strokeLinecap="round" />
+          <path d="M60 152v14" stroke="var(--accent)" strokeWidth="2" strokeDasharray="3 3" />
+          <path d="M56 162l4 5 4-5" fill="var(--accent)" />
+        </>
+      ) : (
+        <>
+          <circle cx="96" cy="16" r="13" fill="var(--accent-soft)" stroke="var(--accent)" strokeWidth="2" />
+          <circle cx="96" cy="11" r="1.8" fill="var(--accent-dark)" />
+          <circle cx="96" cy="16" r="1.8" fill="var(--accent-dark)" />
+          <circle cx="96" cy="21" r="1.8" fill="var(--accent-dark)" />
+          <path d="M96 42V30" stroke="var(--accent)" strokeWidth="2" strokeDasharray="3 3" />
+          <path d="M92 34l4-5 4 5" fill="var(--accent)" />
+        </>
+      )}
+    </svg>
+  );
+}
+
 function stepsFor(platform: Platform): { title: string; intro: string; steps: Step[]; note?: string } {
   switch (platform) {
     case 'ios-safari':
       return {
-        title: 'iPhone / iPad ga o‘rnatish',
-        intro: 'App Store kerak emas. Uch qadam — keyin ilova bosh ekranda turadi.',
+        title: 'Ikonkani telefon ekraniga qo‘shish',
+        intro:
+          'App Store kerak emas. Uch qadamdan so‘ng Turon ikonkasi bosh ekranda paydo bo‘ladi va bosganingizda shu sahifa ochiladi.',
         steps: [
           {
             icon: Share,
@@ -111,26 +169,46 @@ function stepsFor(platform: Platform): { title: string; intro: string; steps: St
         ],
         note: 'Apple veb-sahifaga o‘zi o‘rnatishga ruxsat bermaydi — iPhone’da faqat shu yo‘l bor.',
       };
-    case 'in-app':
+    case 'in-app-android':
       return {
-        title: 'Avval oddiy brauzerda oching',
-        intro: 'Siz Telegram/Instagram ichidagi brauzerdasiz — bu yerdan hech qanday ilova o‘rnatilmaydi.',
+        title: 'Avval Chrome’da oching',
+        intro:
+          'Siz Telegram/Instagram ichidagi brauzerdasiz. Bu oynadan ikonka qo‘shib bo‘lmaydi — buni faqat haqiqiy brauzer qila oladi.',
         steps: [
-          { icon: MoreVertical, text: <>Shu oynaning menyusidan <strong>“Open in browser”</strong> / <strong>“Brauzerda ochish”</strong> ni tanlang.</> },
-          { icon: Copy, text: <>Yoki pastdagi tugma bilan havolani nusxalab, Safari (iPhone) yoki Chrome (Android) ga joylashtiring.</> },
-          { icon: Download, text: <>So‘ng shu tugmani yana bosing.</> },
+          { icon: Compass, text: <>Pastdagi <strong>“Chrome’da ochish”</strong> tugmasini bosing.</> },
+          { icon: MoreVertical, text: <>Yoki shu oynaning menyusidan <strong>“Open in browser”</strong> ni tanlang.</> },
+          { icon: Download, text: <>Chrome ochilgach, o‘ng yuqoridagi <strong>“Ilovani o‘rnatish”</strong> tugmasini bosing.</> },
+        ],
+      };
+    case 'in-app-ios':
+      return {
+        title: 'Avval Safari’da oching',
+        intro:
+          'Siz Telegram/Instagram ichidagi brauzerdasiz. Bu oynadan ikonka qo‘shib bo‘lmaydi — buni faqat Safari qila oladi.',
+        steps: [
+          { icon: MoreVertical, text: <>Shu oynaning menyusidan <strong>“Open in Safari”</strong> / <strong>“Safarida ochish”</strong> ni tanlang.</> },
+          { icon: Copy, text: <>Agar bunday menyu bo‘lmasa — pastdagi tugma bilan havolani nusxalang va Safari’ga joylashtiring.</> },
+          { icon: Share, text: <>Safari’da: <strong>Ulashish</strong> → <strong>“Add to Home Screen”</strong>.</> },
         ],
       };
     case 'android':
       return {
-        title: 'Android ga o‘rnatish',
-        intro: 'Kutmasdan hoziroq o‘rnatmoqchi bo‘lsangiz, menyudan qo‘lda qo‘shsa ham bo‘ladi:',
+        title: 'Ikonkani telefon ekraniga qo‘shish',
+        intro: 'Kutmasdan hoziroq qo‘shmoqchi bo‘lsangiz, Chrome menyusi orqali ham bo‘ladi:',
         steps: [
           { icon: MoreVertical, text: <>Chrome menyusini oching — o‘ng yuqoridagi <strong>⋮</strong>.</> },
-          { icon: Download, text: <><strong>“Install app”</strong> / <strong>“Ilovani o‘rnatish”</strong> ni tanlang.</> },
-          { icon: Check, text: <><strong>“Install”</strong> ni tasdiqlang.</> },
+          {
+            icon: Download,
+            text: (
+              <>
+                <strong>“Install app”</strong> ni tanlang. Agar bunday band bo‘lmasa —{' '}
+                <strong>“Add to Home screen”</strong> ni tanlang: u ham ikonkani ekranga qo‘yadi.
+              </>
+            ),
+          },
+          { icon: Check, text: <>Tasdiqlang — ikonka bosh ekranda paydo bo‘ladi.</> },
         ],
-        note: 'Firefox’da: menyu → “Add to Home screen”.',
+        note: 'Firefox’da ham: menyu → “Add to Home screen”.',
       };
     default:
       return {
@@ -316,6 +394,17 @@ export default function InstallAppButton({
                   {guide.intro}
                 </p>
 
+                {(platform === 'ios-safari' || platform === 'android') && (
+                  <div className="diagram-row">
+                    <PhoneDiagram spot={platform === 'ios-safari' ? 'bottom' : 'top-right'} />
+                    <p className="muted">
+                      {platform === 'ios-safari'
+                        ? 'Ulashish tugmasi ekranning eng pastida, o‘rtada turadi.'
+                        : 'Chrome menyusi ekranning eng yuqorisida, o‘ng tomonda.'}
+                    </p>
+                  </div>
+                )}
+
                 {/* Each step's sentence lives in ONE span: the <li> is a flex
                     row, and bare text around a <strong> would become separate
                     flex items, laying the sentence out as columns. */}
@@ -330,8 +419,20 @@ export default function InstallAppButton({
                   ))}
                 </ol>
 
-                {platform === 'in-app' && (
-                  <button className="primary install-go" onClick={copyLink}>
+                {platform === 'in-app-android' && (
+                  // Android's documented way out of a WebView: an intent URL
+                  // naming Chrome, with the plain https address as fallback if
+                  // Chrome is absent.
+                  <a className="btn primary install-go" href={chromeIntentUrl()}>
+                    <Compass size={16} />
+                    Chrome’da ochish
+                  </a>
+                )}
+                {(platform === 'in-app-android' || platform === 'in-app-ios') && (
+                  <button
+                    className={platform === 'in-app-ios' ? 'primary install-go' : 'install-go'}
+                    onClick={copyLink}
+                  >
                     {copied ? <Check size={16} /> : <Copy size={16} />}
                     {copied ? 'Nusxalandi — brauzerga joylashtiring' : 'Havolani nusxalash'}
                   </button>
