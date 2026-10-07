@@ -322,6 +322,9 @@ button.icon-only:hover { background: #eef1f5; border-color: transparent; }
   padding: 12px 13px; font-size: 13px; line-height: 1.55;
 }
 .install-waiting > svg { color: var(--accent-dark); margin-top: 1px; }
+/* Waiting turned into a verdict: this browser will not install. */
+.install-waiting.stalled { background: var(--warn-soft); border-color: #f3e0bd; }
+.install-waiting.stalled > svg { color: var(--warn); }
 
 /* The real install trigger, once the browser hands it over. */
 .install-go {

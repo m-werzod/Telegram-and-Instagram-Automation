@@ -9,6 +9,7 @@ import {
   Check,
   Compass,
   Loader2,
+  AlertTriangle,
 } from 'lucide-react';
 
 /**
@@ -42,6 +43,14 @@ type Platform = 'ios-safari' | 'ios-other' | 'android' | 'in-app-android' | 'in-
 
 /** Chrome's documented engagement delay before it offers the prompt. */
 const ENGAGEMENT_SECONDS = 30;
+/**
+ * Past this, waiting is a lie. User-agent sniffing cannot reliably tell a real
+ * Chrome from the WebView inside Telegram — a phone reported "brauzer: android"
+ * with no prompt after 47 seconds while visibly sitting in Telegram's browser —
+ * so the verdict is behavioural: no prompt by now means this browser will not
+ * install, and the escape route is what matters, not the diagnosis.
+ */
+const GIVE_UP_SECONDS = 38;
 
 function detectPlatform(): Platform {
   const ua = navigator.userAgent;
@@ -171,13 +180,12 @@ function stepsFor(platform: Platform): { title: string; intro: string; steps: St
       };
     case 'in-app-android':
       return {
-        title: 'Avval Chrome’da oching',
-        intro:
-          'Siz Telegram/Instagram ichidagi brauzerdasiz. Bu oynadan ikonka qo‘shib bo‘lmaydi — buni faqat haqiqiy brauzer qila oladi.',
+        title: 'Ikonkani telefon ekraniga qo‘shish',
+        intro: 'Yoki shu oynaning o‘zidan:',
         steps: [
-          { icon: Compass, text: <>Pastdagi <strong>“Chrome’da ochish”</strong> tugmasini bosing.</> },
-          { icon: MoreVertical, text: <>Yoki shu oynaning menyusidan <strong>“Open in browser”</strong> ni tanlang.</> },
-          { icon: Download, text: <>Chrome ochilgach, o‘ng yuqoridagi <strong>“Ilovani o‘rnatish”</strong> tugmasini bosing.</> },
+          { icon: MoreVertical, text: <>Yuqoridagi <strong>⋮</strong> menyuni oching.</> },
+          { icon: Compass, text: <><strong>“Open in browser”</strong> / <strong>“Brauzerda ochish”</strong> ni tanlang.</> },
+          { icon: Download, text: <>Chrome ochilgach — <strong>⋮</strong> → <strong>“Add to Home screen”</strong>.</> },
         ],
       };
     case 'in-app-ios':
@@ -194,7 +202,7 @@ function stepsFor(platform: Platform): { title: string; intro: string; steps: St
     case 'android':
       return {
         title: 'Ikonkani telefon ekraniga qo‘shish',
-        intro: 'Kutmasdan hoziroq qo‘shmoqchi bo‘lsangiz, Chrome menyusi orqali ham bo‘ladi:',
+        intro: 'Yoki kutmasdan, menyu orqali — eng tez yo‘l shu:',
         steps: [
           { icon: MoreVertical, text: <>Chrome menyusini oching — o‘ng yuqoridagi <strong>⋮</strong>.</> },
           {
@@ -240,6 +248,8 @@ export default function InstallAppButton({
   const mountedAt = useRef(Date.now());
   const platform = detectPlatform();
   const waitable = canAutoInstall(platform);
+  /** Android, however the browser describes itself — the intent escape applies. */
+  const androidish = platform === 'android' || platform === 'in-app-android';
 
   useEffect(() => {
     const onPrompt = (e: Event) => {
@@ -266,10 +276,9 @@ export default function InstallAppButton({
   // and the prompt has not arrived, so it costs nothing the rest of the time.
   useEffect(() => {
     if (!sheet || prompt || !waitable) return;
-    const t = setInterval(
-      () => setElapsed(Math.floor((Date.now() - mountedAt.current) / 1000)),
-      1000,
-    );
+    const tick = () => setElapsed(Math.floor((Date.now() - mountedAt.current) / 1000));
+    tick();
+    const t = setInterval(tick, 1000);
     return () => clearInterval(t);
   }, [sheet, prompt, waitable]);
 
@@ -316,6 +325,7 @@ export default function InstallAppButton({
   const guide = stepsFor(platform);
   const label = "Ilovani o'rnatish";
   const remaining = Math.max(0, ENGAGEMENT_SECONDS - elapsed);
+  const givenUp = elapsed >= GIVE_UP_SECONDS;
 
   return (
     <>
@@ -372,19 +382,40 @@ export default function InstallAppButton({
               </>
             ) : (
               <>
+                {/* On Android the one-tap escape comes FIRST. It is the fix
+                    for the most common cause of "it never installs" — being in
+                    an app's built-in browser — and it is harmless in real
+                    Chrome, where it just reopens the same page. */}
+                {androidish && (
+                  <>
+                    <a className="btn primary install-go" href={chromeIntentUrl()}>
+                      <Compass size={17} />
+                      Chrome’da ochish
+                    </a>
+                    <p className="muted" style={{ fontSize: 12.5, margin: '8px 0 0' }}>
+                      Telegram yoki Instagram ichidagi brauzerda ikonka qo‘shib bo‘lmaydi. Bu tugma
+                      shu sahifani haqiqiy Chrome’da ochadi — u yerda ishlaydi.
+                    </p>
+                  </>
+                )}
+
                 {waitable && (
-                  <div className="install-waiting">
-                    <Loader2 size={18} className="spin" />
+                  <div className={`install-waiting${givenUp ? ' stalled' : ''}`}>
+                    {givenUp ? <AlertTriangle size={18} /> : <Loader2 size={18} className="spin" />}
                     <div>
                       <strong>
-                        {dismissed
-                          ? 'Bekor qilindi — qayta tayyorlanmoqda'
-                          : 'Avtomatik o‘rnatish tayyorlanmoqda…'}
+                        {givenUp
+                          ? 'Bu brauzer avtomatik o‘rnatishni qo‘llamaydi'
+                          : dismissed
+                            ? 'Bekor qilindi — qayta tayyorlanmoqda'
+                            : 'Avtomatik o‘rnatish tayyorlanmoqda…'}
                       </strong>
                       <div className="muted" style={{ fontSize: 12.5, marginTop: 3 }}>
-                        {remaining > 0
-                          ? `Chrome sahifada ~${ENGAGEMENT_SECONDS} soniya bo‘lishingizni kutadi. Taxminan ${remaining} soniya qoldi — shu oynani ochiq qoldiring, tugma o‘zi shu yerda paydo bo‘ladi.`
-                          : 'Deyarli tayyor. Shu oynani ochiq qoldiring — tugma shu yerda paydo bo‘ladi.'}
+                        {givenUp
+                          ? 'Yuqoridagi “Chrome’da ochish” tugmasini bosing yoki quyidagi menyu orqali ikonkani qo‘shing.'
+                          : remaining > 0
+                            ? `Chrome sahifada ~${ENGAGEMENT_SECONDS} soniya bo‘lishingizni kutadi — taxminan ${remaining} soniya qoldi.`
+                            : 'Deyarli tayyor — shu oynani ochiq qoldiring.'}
                       </div>
                     </div>
                   </div>
@@ -419,15 +450,6 @@ export default function InstallAppButton({
                   ))}
                 </ol>
 
-                {platform === 'in-app-android' && (
-                  // Android's documented way out of a WebView: an intent URL
-                  // naming Chrome, with the plain https address as fallback if
-                  // Chrome is absent.
-                  <a className="btn primary install-go" href={chromeIntentUrl()}>
-                    <Compass size={16} />
-                    Chrome’da ochish
-                  </a>
-                )}
                 {(platform === 'in-app-android' || platform === 'in-app-ios') && (
                   <button
                     className={platform === 'in-app-ios' ? 'primary install-go' : 'install-go'}
