@@ -28,6 +28,12 @@ function fullDecision(): AgentDecision {
     shouldEscalate: true,
     escalationReason: 'High-value purchase intent',
     internalNote: 'Asked for pricing tier details.',
+    courseRegistration: {
+      fullName: 'Alice Doe',
+      phone: '+998901234567',
+      course: 'B toifa',
+      preferredTime: 'ertalab',
+    },
     sendPrivateReply: true,
     privateReplyText: 'Sent you a DM with details!',
     sendImageId: null,

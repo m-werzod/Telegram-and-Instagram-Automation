@@ -16,7 +16,7 @@ import {
   readTelegramProfile,
   DEFAULT_BOT_PROFILE,
 } from '../modules/channels/telegram/service.js';
-import { requireAdmin, requireAuth, tenantOf } from './middleware.js';
+import { adminOnlyWrites, requireAdmin, requireAuth, tenantOf } from './middleware.js';
 
 const botProfileSchema = z.object({
   name: z.string().trim().min(1).max(64),
@@ -41,6 +41,9 @@ const botProfileSchema = z.object({
  */
 export async function connectionRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('preHandler', requireAuth);
+  // Belt and braces: every handler below also calls requireAdmin, but a new
+  // route added later must not be able to forget it.
+  app.addHook('preHandler', adminOnlyWrites);
 
   app.get('/api/connections', async (req) => {
     const connections = await getPrisma().channelConnection.findMany({

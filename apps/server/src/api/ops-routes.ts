@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { getPrisma } from '../db/client.js';
 import { NotFoundError, ValidationError } from '../lib/errors.js';
-import { requireAuth, tenantOf } from './middleware.js';
+import { requireAdmin, requireAuth, tenantOf } from './middleware.js';
 
 const eventStatusFilter = z.enum([
   'RECEIVED',
@@ -34,6 +34,7 @@ export async function opsRoutes(app: FastifyInstance): Promise<void> {
   app.get<{ Querystring: { status?: string; channel?: string; page?: string } }>(
     '/api/logs/webhook-events',
     async (req) => {
+      requireAdmin(req);
       const tenantId = tenantOf(req);
       const page = Math.max(1, Number(req.query.page) || 1);
       const where: Record<string, unknown> = { tenantId };
@@ -52,6 +53,7 @@ export async function opsRoutes(app: FastifyInstance): Promise<void> {
   );
 
   app.get<{ Querystring: { page?: string } }>('/api/logs/ai-executions', async (req) => {
+    requireAdmin(req);
     const tenantId = tenantOf(req);
     const page = Math.max(1, Number(req.query.page) || 1);
     const executions = await getPrisma().aIExecution.findMany({
@@ -65,6 +67,7 @@ export async function opsRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.get<{ Querystring: { page?: string } }>('/api/logs/tool-executions', async (req) => {
+    requireAdmin(req);
     const tenantId = tenantOf(req);
     const page = Math.max(1, Number(req.query.page) || 1);
     const executions = await getPrisma().toolExecution.findMany({
@@ -77,6 +80,7 @@ export async function opsRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.get('/api/stats', async (req) => {
+    requireAdmin(req);
     const tenantId = tenantOf(req);
     const prisma = getPrisma();
     const dayAgo = new Date(Date.now() - 24 * 3600_000);
@@ -147,6 +151,7 @@ export async function opsRoutes(app: FastifyInstance): Promise<void> {
 
   // ── Manual actions ────────────────────────────────────────────────────────
   app.get('/api/manual-actions', async (req) => {
+    requireAdmin(req);
     const actions = await getPrisma().manualAction.findMany({
       where: { tenantId: tenantOf(req) },
       orderBy: [{ status: 'asc' }, { createdAt: 'asc' }],
@@ -157,6 +162,7 @@ export async function opsRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Params: { id: string }; Body: { status?: 'DONE' | 'DISMISSED' | 'PENDING' } }>(
     '/api/manual-actions/:id/status',
     async (req) => {
+      requireAdmin(req);
       const tenantId = tenantOf(req);
       const status = req.body?.status ?? 'DONE';
       const action = await getPrisma().manualAction.findFirst({

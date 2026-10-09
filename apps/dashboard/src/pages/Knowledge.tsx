@@ -4,6 +4,7 @@ import { BookOpen, Plus, FileText, Link2, Type, RefreshCw, Trash2, Search, FileP
 import { api, ApiError, type KnowledgeBase, type KnowledgeDocument } from '../api';
 import IconChip from '../components/IconChip';
 import QueryError from '../components/QueryError';
+import OwnerInstructions from '../components/OwnerInstructions';
 
 const STATUS_LABEL: Record<string, string> = {
   PENDING: 'KUTILMOQDA',
@@ -44,6 +45,9 @@ export default function Knowledge() {
       </div>
 
       <QueryError error={bases.error} onRetry={() => bases.refetch()} />
+
+      {/* Rules the owner writes, as opposed to documents the agent searches. */}
+      <OwnerInstructions />
 
       <div className="card row">
         <select value={kbId ?? ''} onChange={(e) => setSelected(e.target.value)} style={{ width: 280 }}>

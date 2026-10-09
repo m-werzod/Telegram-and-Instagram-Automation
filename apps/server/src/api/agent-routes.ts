@@ -4,7 +4,7 @@ import { getPrisma } from '../db/client.js';
 import { NotFoundError, ValidationError } from '../lib/errors.js';
 import { providerForModel, SUPPORTED_MODELS } from '../modules/ai/index.js';
 import { agentSettingsSchema } from '../modules/engine/business-rules.js';
-import { requireAuth, tenantOf } from './middleware.js';
+import { adminOnly, requireAuth, tenantOf } from './middleware.js';
 
 /**
  * Agent management (spec §5–§7): list, configure, toggle. The enabled flag is
@@ -27,6 +27,8 @@ const agentUpdateSchema = z
 
 export async function agentRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('preHandler', requireAuth);
+  // Agent configuration is administration, not CRM work.
+  app.addHook('preHandler', adminOnly);
 
   /** Models an agent can be set to, with the per-provider price hint. */
   app.get('/api/agents/models', async () => ({ models: SUPPORTED_MODELS }));

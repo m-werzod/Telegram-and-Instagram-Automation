@@ -5,13 +5,14 @@ import { NotFoundError, ValidationError } from '../lib/errors.js';
 import { getQueue } from '../queue/index.js';
 import { searchKnowledge } from '../modules/knowledge/service.js';
 import { deleteStoredFile, storeFile } from '../modules/knowledge/storage.js';
-import { requireAuth, tenantOf } from './middleware.js';
+import { adminOnly, requireAuth, tenantOf } from './middleware.js';
 
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 
 /** Knowledge base management + ingestion (spec §8). */
 export async function knowledgeRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('preHandler', requireAuth);
+  app.addHook('preHandler', adminOnly);
 
   app.get('/api/knowledge-bases', async (req) => {
     const bases = await getPrisma().knowledgeBase.findMany({

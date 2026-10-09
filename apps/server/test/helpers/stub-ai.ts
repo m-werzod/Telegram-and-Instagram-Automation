@@ -20,6 +20,7 @@ export function makeDecision(overrides: Partial<AgentDecision> = {}): AgentDecis
     shouldEscalate: false,
     escalationReason: null,
     internalNote: null,
+    courseRegistration: null,
     sendPrivateReply: false,
     privateReplyText: null,
     sendImageId: null,

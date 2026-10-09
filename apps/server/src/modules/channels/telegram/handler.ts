@@ -9,6 +9,20 @@ import { runAgentPipeline } from '../../engine/pipeline.js';
 import { resolveManualAction } from '../../manual-actions/service.js';
 import { getMediaAssetWithData } from '../../media/service.js';
 import { claimIdempotency, releaseIdempotency } from '../shared/idempotency.js';
+import {
+  detectLanguage,
+  reminderIsDue,
+  UZBEK_ONLY_REPLY,
+  VOICE_NOT_SUPPORTED_REPLY,
+} from '../../engine/language.js';
+import {
+  isExcluded,
+  markLanguageReminderSent,
+  parseOwnerCommand,
+  readConversationMetadata,
+  sendStillAllowed,
+  setConversationExcluded,
+} from './exclusions.js';
 import { getTelegramClient } from './service.js';
 import {
   splitMessage,
@@ -220,9 +234,10 @@ export async function processTelegramEvent(event: WebhookEvent): Promise<void> {
       conversationId: conversation.id,
       lead,
       channelKey: 'telegram',
-      inboundText: message.text,
+      inboundText: message.text!,
       username: message.from.username ?? null,
       requestId,
+      sourceAccount: connection.displayName,
     });
   } finally {
     stopTyping();
@@ -235,6 +250,14 @@ export async function processTelegramEvent(event: WebhookEvent): Promise<void> {
 
   if (outcome.status === 'replied' && outcome.verdict?.reply) {
     const client = getTelegramClient(connection);
+    if (outcome.verdict.stickerId) {
+      await sendStickerSafely({
+        client,
+        chatId: message.chat.id,
+        stickerId: outcome.verdict.stickerId,
+        log,
+      });
+    }
     // Per-part idempotency: if part 2 of a long reply hits flood control, the
     // queue retry resumes at the failed part instead of re-sending part 1.
     const parts = splitMessage(outcome.verdict.reply, TELEGRAM_MAX_MESSAGE);
@@ -471,13 +494,54 @@ async function processPersonalMessage(
     }
   }
 
-  if (!message.text || !message.from || message.chat.type !== 'private') {
-    await markEvent(event.id, 'SKIPPED', 'not a processable personal-chat text message');
+  if (!message.from || message.chat.type !== 'private') {
+    await markEvent(event.id, 'SKIPPED', 'not a processable personal chat');
+    return;
+  }
+  // Audio we do not transcribe. Silence here reads as a broken account, so
+  // the customer is asked for text instead — never pretending the audio was
+  // understood.
+  const isUnsupportedAudio = Boolean(message.voice || message.audio || message.video_note);
+  const inboundText = message.text ?? message.caption ?? '';
+  if (!inboundText && !isUnsupportedAudio) {
+    await markEvent(event.id, 'SKIPPED', 'message carries no text the agent can act on');
     return;
   }
   // The owner's own outgoing messages also arrive as business messages —
-  // never treat the owner as a customer or auto-reply to them.
+  // never treat the owner as a customer or auto-reply to them. But a command
+  // the owner types in a chat IS addressed to us: /stop and /start are how
+  // they exclude a conversation from automation, which is the supported
+  // stand-in for "the chat is pinned" (see exclusions.ts for why the Bot API
+  // cannot read pinned dialogs).
   if (String(message.from.id) === account.ownerUserId || message.from.is_bot) {
+    const command = parseOwnerCommand(message.text);
+    if (command && String(message.from.id) === account.ownerUserId) {
+      const existing = await prisma.conversation.findUnique({
+        where: {
+          tenantId_kind_externalThreadId: {
+            tenantId,
+            kind: 'TELEGRAM_PERSONAL_CHAT',
+            externalThreadId: `${account.businessConnectionId}:${message.chat.id}`,
+          },
+        },
+      });
+      if (existing) {
+        await setConversationExcluded({
+          tenantId,
+          conversationId: existing.id,
+          excluded: command === 'exclude',
+          by: 'owner_command',
+        });
+      }
+      await markEvent(
+        event.id,
+        'PROCESSED',
+        command === 'exclude'
+          ? 'owner excluded this chat from automation'
+          : 'owner resumed automation for this chat',
+      );
+      return;
+    }
     await markEvent(event.id, 'SKIPPED', 'message from the account owner (or a bot) — recorded only');
     return;
   }
@@ -529,9 +593,9 @@ async function processPersonalMessage(
         tenantId,
         direction: 'INBOUND',
         role: 'USER',
-        content: message.text,
+        content: inboundText || '[ovozli xabar]',
         externalMessageId: String(message.message_id),
-        metadata: { updateId: update.update_id, personal: true },
+        metadata: { updateId: update.update_id, personal: true, voice: isUnsupportedAudio },
       },
     });
   } catch (err) {
@@ -571,6 +635,50 @@ async function processPersonalMessage(
     return;
   }
 
+  // ── Gate 1: is this chat excluded from automation? ──────────────────────
+  // The owner's /stop marks a chat; this is the supported stand-in for "the
+  // owner pinned it", which the Bot API cannot report. Checked here so the
+  // model is never even called, and again just before the send.
+  if (isExcluded(conversation.metadata)) {
+    await markEvent(event.id, 'SKIPPED', 'chat excluded from automation by the owner (/stop)');
+    return;
+  }
+
+  // ── Gate 2: can the agent act on this message at all? ───────────────────
+  // Audio first — an unsupported attachment is not a language question.
+  const client = getTelegramClient(connection);
+  if (isUnsupportedAudio && !inboundText) {
+    if (await sendStillAllowed(conversation.id)) {
+      await client.sendMessage(message.chat.id, VOICE_NOT_SUPPORTED_REPLY, {
+        businessConnectionId: account.businessConnectionId,
+      });
+      await recordOutbound(tenantId, conversation.id, VOICE_NOT_SUPPORTED_REPLY, 'voice_unsupported');
+    }
+    await markEvent(event.id, 'PROCESSED', 'voice message — asked the customer to write in Uzbek');
+    return;
+  }
+
+  // Uzbek-only policy. Only a CONFIDENT non-Uzbek verdict interrupts;
+  // anything short of that is answered normally, because nagging someone who
+  // did write Uzbek is worse than answering a stray English word.
+  const language = detectLanguage(inboundText);
+  if (language.verdict === 'other') {
+    const meta = readConversationMetadata(conversation.metadata);
+    if (reminderIsDue(meta.languageReminderAt)) {
+      if (await sendStillAllowed(conversation.id)) {
+        await client.sendMessage(message.chat.id, UZBEK_ONLY_REPLY, {
+          businessConnectionId: account.businessConnectionId,
+        });
+        await recordOutbound(tenantId, conversation.id, UZBEK_ONLY_REPLY, 'language_reminder');
+        await markLanguageReminderSent(conversation.id);
+      }
+      await markEvent(event.id, 'PROCESSED', `non-Uzbek message (${language.reason}) — reminder sent`);
+    } else {
+      await markEvent(event.id, 'SKIPPED', 'non-Uzbek message — reminder already sent recently');
+    }
+    return;
+  }
+
   // Per-account overrides: instructions and knowledge base fall back to the
   // TELEGRAM_PERSONAL agent defaults when not set for this account.
   const effectiveAgent: Agent = {
@@ -593,9 +701,10 @@ async function processPersonalMessage(
       conversationId: conversation.id,
       lead,
       channelKey: 'telegram_personal',
-      inboundText: message.text,
+      inboundText,
       username: message.from.username ?? null,
       requestId,
+      sourceAccount: account.displayName || account.ownerName,
     });
   } finally {
     stopTyping();
@@ -606,8 +715,26 @@ async function processPersonalMessage(
   }
 
   if (outcome.status === 'replied' && outcome.verdict?.reply) {
-    const client = getTelegramClient(connection);
+    // ── Gate 3: the chat may have been excluded WHILE the model was running.
+    // This is the window the requirement exists to close: generation takes
+    // seconds, and a reply that lands after the owner said /stop is exactly
+    // the message that must never be sent. Re-read, and stay silent if the
+    // state cannot be confirmed.
+    if (!(await sendStillAllowed(conversation.id))) {
+      await markEvent(event.id, 'SKIPPED', 'chat excluded while the reply was being generated');
+      log.info('reply withheld — chat excluded during generation');
+      return;
+    }
     const bcId = account.businessConnectionId;
+    if (outcome.verdict.stickerId) {
+      await sendStickerSafely({
+        client,
+        chatId: message.chat.id,
+        stickerId: outcome.verdict.stickerId,
+        businessConnectionId: bcId,
+        log,
+      });
+    }
     const parts = splitMessage(outcome.verdict.reply, TELEGRAM_MAX_MESSAGE);
     for (let i = 0; i < parts.length; i++) {
       const key = `tg_personal_reply:${connection.id}:${update.update_id}:${i}`;
@@ -655,6 +782,62 @@ async function processPersonalMessage(
 
   await markEvent(event.id, 'PROCESSED');
   log.info({ outcome: outcome.status }, 'personal-account message processed');
+}
+
+/**
+ * Record a reply the platform sent WITHOUT the agent — a language reminder or
+ * a voice fallback. These are outbound messages like any other and belong in
+ * the conversation, or the transcript shows the customer talking to nobody.
+ */
+/**
+ * Send the configured sticker for this turn, before the text so it reads as a
+ * reaction rather than an afterthought.
+ *
+ * Entirely best effort. A sticker file id can be revoked, belong to a pack
+ * the account cannot access, or simply be wrong — none of which is worth
+ * losing the answer over, so every failure is swallowed and logged. Price
+ * facts always live in the text, never in the sticker.
+ */
+async function sendStickerSafely(params: {
+  client: TelegramClient;
+  chatId: number;
+  stickerId: string;
+  businessConnectionId?: string;
+  log: ReturnType<typeof childLogger>;
+}): Promise<void> {
+  try {
+    await params.client.sendSticker(params.chatId, params.stickerId, {
+      ...(params.businessConnectionId ? { businessConnectionId: params.businessConnectionId } : {}),
+    });
+  } catch (err) {
+    params.log.warn(
+      { err: errorMessage(err), stickerId: params.stickerId },
+      'sticker rejected by Telegram — sending the text only',
+    );
+  }
+}
+
+async function recordOutbound(
+  tenantId: string,
+  conversationId: string,
+  content: string,
+  kind: 'language_reminder' | 'voice_unsupported',
+): Promise<void> {
+  await getPrisma()
+    .conversationMessage.create({
+      data: {
+        conversationId,
+        tenantId,
+        direction: 'OUTBOUND',
+        role: 'SYSTEM',
+        content,
+        metadata: { policy: kind },
+      },
+    })
+    .catch(() => undefined);
+  await getPrisma()
+    .conversation.update({ where: { id: conversationId }, data: { lastMessageAt: new Date() } })
+    .catch(() => undefined);
 }
 
 async function markEvent(

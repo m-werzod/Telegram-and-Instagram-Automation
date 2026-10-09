@@ -21,23 +21,25 @@ model Tenant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users              User[]
-  agents             Agent[]
-  knowledgeBases     KnowledgeBase[]
-  channelConnections ChannelConnection[]
-  leads              Lead[]
-  conversations      Conversation[]
-  webhookEvents      WebhookEvent[]
-  aiExecutions       AIExecution[]
-  toolExecutions     ToolExecution[]
-  crmNotes           CrmNote[]
-  handoffs           HumanHandoff[]
-  manualActions      ManualAction[]
-  auditLogs          AuditLog[]
-  idempotencyKeys    IdempotencyKey[]
-  mediaAssets        MediaAsset[]
-  appSettings        AppSetting[]
+  users                    User[]
+  agents                   Agent[]
+  knowledgeBases           KnowledgeBase[]
+  channelConnections       ChannelConnection[]
+  leads                    Lead[]
+  conversations            Conversation[]
+  webhookEvents            WebhookEvent[]
+  aiExecutions             AIExecution[]
+  toolExecutions           ToolExecution[]
+  crmNotes                 CrmNote[]
+  handoffs                 HumanHandoff[]
+  manualActions            ManualAction[]
+  auditLogs                AuditLog[]
+  idempotencyKeys          IdempotencyKey[]
+  mediaAssets              MediaAsset[]
+  appSettings              AppSetting[]
   telegramPersonalAccounts TelegramPersonalAccount[]
+  courseRegistrations      CourseRegistration[]
+  ownerInstructions        OwnerInstruction[]
 }
 
 enum UserRole {
@@ -49,7 +51,9 @@ model User {
   id           String   @id @default(cuid())
   tenantId     String
   tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  /** Login name for the dashboard (authentication is by username, not email). */
+  /**
+   * Login name for the dashboard (authentication is by username, not email).
+   */
   username     String   @unique
   email        String?  @unique
   passwordHash String
@@ -58,8 +62,9 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  sessions      AuthSession[]
-  assignedLeads Lead[]        @relation("AssignedLeads")
+  sessions              AuthSession[]
+  assignedLeads         Lead[]               @relation("AssignedLeads")
+  assignedRegistrations CourseRegistration[] @relation("AssignedRegistrations")
 
   @@index([tenantId])
 }
@@ -81,30 +86,32 @@ enum AgentType {
   INSTAGRAM_COMMENT
   INSTAGRAM_DM
   TELEGRAM
-  /** Automates the owner's PERSONAL Telegram account chats (not the bot's). */
+  /**
+   * Automates the owner's PERSONAL Telegram account chats (not the bot's).
+   */
   TELEGRAM_PERSONAL
 }
 
 model Agent {
-  id                 String    @id @default(cuid())
+  id                 String         @id @default(cuid())
   tenantId           String
-  tenant             Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant             Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   type               AgentType
   name               String
-  enabled            Boolean   @default(false)
-  systemInstructions String    @default("")
-  businessObjective  String    @default("")
-  tone               String    @default("friendly, professional")
-  language           String    @default("auto") // "auto" = detect; or a fixed code e.g. "uz", "ru", "en"
-  provider           String    @default("anthropic")
-  model              String    @default("claude-opus-5")
+  enabled            Boolean        @default(false)
+  systemInstructions String         @default("")
+  businessObjective  String         @default("")
+  tone               String         @default("friendly, professional")
+  language           String         @default("auto") // "auto" = detect; or a fixed code e.g. "uz", "ru", "en"
+  provider           String         @default("anthropic")
+  model              String         @default("claude-opus-5")
   knowledgeBaseId    String?
   knowledgeBase      KnowledgeBase? @relation(fields: [knowledgeBaseId], references: [id], onDelete: SetNull)
   // Escalation rules and channel-specific behavior knobs (validated by Zod at the app layer).
-  escalationRules    Json      @default("{}")
-  settings           Json      @default("{}")
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  escalationRules    Json           @default("{}")
+  settings           Json           @default("{}")
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
 
   conversations Conversation[]
   aiExecutions  AIExecution[]
@@ -124,9 +131,9 @@ model KnowledgeBase {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  documents KnowledgeDocument[]
-  chunks    KnowledgeChunk[]
-  agents    Agent[]
+  documents                KnowledgeDocument[]
+  chunks                   KnowledgeChunk[]
+  agents                   Agent[]
   telegramPersonalAccounts TelegramPersonalAccount[]
 
   @@index([tenantId])
@@ -184,16 +191,16 @@ model KnowledgeFile {
 }
 
 model KnowledgeChunk {
-  id              String            @id @default(cuid())
+  id              String                   @id @default(cuid())
   documentId      String
-  document        KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  document        KnowledgeDocument        @relation(fields: [documentId], references: [id], onDelete: Cascade)
   knowledgeBaseId String
-  knowledgeBase   KnowledgeBase     @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+  knowledgeBase   KnowledgeBase            @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
   tenantId        String
   ord             Int
   content         String
-  tokenCount      Int               @default(0)
-  metadata        Json              @default("{}")
+  tokenCount      Int                      @default(0)
+  metadata        Json                     @default("{}")
   // Untyped pgvector column: supports any embedding dimension; similarity search uses
   // exact scan (fine for KB scale). A dimension-typed column + HNSW index can be added
   // in a migration once the embedding model is fixed for a deployment.
@@ -284,16 +291,17 @@ model Lead {
   conversations Conversation[]
   notes         CrmNote[]
   handoffs      HumanHandoff[]
+  registrations CourseRegistration[]
 
   @@index([tenantId, status])
   @@index([tenantId, lastInteractionAt])
 }
 
 model LeadIdentity {
-  id         String  @id @default(cuid())
+  id         String   @id @default(cuid())
   tenantId   String
   leadId     String
-  lead       Lead    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  lead       Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
   channel    Channel
   externalId String // IGSID for Instagram messaging, IG commenter user id, Telegram user id
   username   String?
@@ -315,7 +323,9 @@ enum ConversationKind {
   INSTAGRAM_COMMENT_THREAD
   INSTAGRAM_DM
   TELEGRAM_CHAT
-  /** A private chat of the owner's personal Telegram account. */
+  /**
+   * A private chat of the owner's personal Telegram account.
+   */
   TELEGRAM_PERSONAL_CHAT
 }
 
@@ -337,8 +347,9 @@ model Conversation {
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
 
-  messages ConversationMessage[]
-  handoffs HumanHandoff[]
+  messages      ConversationMessage[]
+  handoffs      HumanHandoff[]
+  registrations CourseRegistration[]
 
   @@unique([tenantId, kind, externalThreadId])
   @@index([tenantId, lastMessageAt])
@@ -397,7 +408,9 @@ model WebhookEvent {
   error       String?
   attempts    Int                @default(0)
   receivedAt  DateTime           @default(now())
-  /** Set when a worker atomically claims the event (stale-claim recovery). */
+  /**
+   * Set when a worker atomically claims the event (stale-claim recovery).
+   */
   claimedAt   DateTime?
   processedAt DateTime?
 
@@ -466,6 +479,145 @@ model CrmNote {
   createdAt    DateTime @default(now())
 
   @@index([leadId, createdAt])
+}
+
+/**
+ * A course registration — a lead who actually asked to enrol, as opposed to
+ * anyone who merely said hello.
+ * Deliberately separate from Lead: every inbound conversation creates a Lead,
+ * but only a stated intent to register creates one of these, and the sales
+ * team works this list rather than the firehose. It keeps the registration's
+ * own lifecycle, its own assignee and its own audit trail, while staying
+ * joined to the lead and the conversation it came from.
+ */
+/**
+ * "Qo'shimcha AI ko'rsatmalari" — short business rules the owner writes in
+ * their own words, without touching the system prompt.
+ * Separate from both the knowledge base and the agent's systemInstructions.
+ * The knowledge base answers "what is true" and is retrieved by relevance;
+ * these answer "what to DO in situation X" and must always be in context, so
+ * they are injected verbatim on every turn rather than searched for.
+ * Scoped to the tenant, optionally narrowed to one channel, so the owner can
+ * say something on Telegram that does not apply to Instagram.
+ */
+model OwnerInstruction {
+  id        String     @id @default(cuid())
+  tenantId  String
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /**
+   * The rule, in the owner's own words.
+   */
+  text      String
+  enabled   Boolean    @default(true)
+  /**
+   * null = every channel. Otherwise an AgentType this applies to.
+   */
+  appliesTo AgentType?
+  /**
+   * Manual ordering in the dashboard; lower first.
+   */
+  position  Int        @default(0)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@index([tenantId, enabled])
+}
+
+enum RegistrationStatus {
+  /**
+   * Yangi ariza
+   */
+  NEW
+  /**
+   * Bog'lanish kerak
+   */
+  CONTACT_NEEDED
+  /**
+   * Mijoz bilan bog'lanildi
+   */
+  CONTACTED
+  /**
+   * Sinov darsi belgilandi
+   */
+  TRIAL_BOOKED
+  /**
+   * Kursga yozildi
+   */
+  ENROLLED
+  /**
+   * Yakunlandi
+   */
+  COMPLETED
+  /**
+   * Bekor qilindi
+   */
+  CANCELLED
+}
+
+model CourseRegistration {
+  id             String        @id @default(cuid())
+  tenantId       String
+  tenant         Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  leadId         String
+  lead           Lead          @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  /**
+   * The conversation it was collected in; kept so staff can read the context.
+   */
+  conversationId String?
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  fullName      String
+  phone         String
+  course        String
+  preferredTime String?
+  note          String?
+
+  /**
+   * Where it came from, preserved even after the channel account is switched.
+   */
+  sourceChannel Channel
+  sourceAccount String?
+
+  status           RegistrationStatus @default(NEW)
+  assignedToUserId String?
+  assignedTo       User?              @relation("AssignedRegistrations", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  events RegistrationEvent[]
+
+  /**
+   * One registration per person per course. The agent re-reads intent on every
+   * message, so without this a customer repeating themselves would file the
+   * same application several times.
+   */
+  @@unique([tenantId, leadId, course])
+  @@index([tenantId, status])
+  @@index([tenantId, createdAt])
+}
+
+/**
+ * Who moved a registration to which status, and when.
+ */
+model RegistrationEvent {
+  id             String              @id @default(cuid())
+  registrationId String
+  registration   CourseRegistration  @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+  fromStatus     RegistrationStatus?
+  toStatus       RegistrationStatus
+  note           String?
+  /**
+   * Dashboard user, when the change came from the web CRM.
+   */
+  byUserId       String?
+  /**
+   * Telegram user id, when it came from the CRM bot.
+   */
+  byTelegramId   String?
+  createdAt      DateTime            @default(now())
+
+  @@index([registrationId, createdAt])
 }
 
 enum HandoffStatus {
@@ -543,7 +695,9 @@ model MediaAsset {
   tenantId    String
   tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   name        String
-  /** Shown to the AI to decide WHEN this image is relevant — write it clearly. */
+  /**
+   * Shown to the AI to decide WHEN this image is relevant — write it clearly.
+   */
   description String   @default("")
   mimeType    String
   sizeBytes   Int      @default(0)
@@ -584,31 +738,41 @@ model AppSetting {
  * TELEGRAM_PERSONAL agent's defaults when null).
  */
 model TelegramPersonalAccount {
-  id                   String   @id @default(cuid())
+  id                   String         @id @default(cuid())
   tenantId             String
-  tenant               Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  /** Telegram's business_connection.id — stable handle for sending replies. */
-  businessConnectionId String   @unique
-  /** Telegram user id of the account owner (string: exceeds 2^31). */
+  tenant               Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /**
+   * Telegram's business_connection.id — stable handle for sending replies.
+   */
+  businessConnectionId String         @unique
+  /**
+   * Telegram user id of the account owner (string: exceeds 2^31).
+   */
   ownerUserId          String
-  ownerName            String   @default("")
+  ownerName            String         @default("")
   ownerUsername        String?
-  userChatId           String   @default("")
-  /** Telegram-side state: owner can disable the connection in their app. */
-  isEnabled            Boolean  @default(true)
-  canReply             Boolean  @default(false)
-  canReadMessages      Boolean  @default(false)
-  connectedAt          DateTime @default(now())
-  /** Admin-side automation toggle — OFF by default until explicitly enabled. */
-  enabled              Boolean  @default(false)
-  displayName          String   @default("")
-  /** Per-account instruction override; null → TELEGRAM_PERSONAL agent default. */
+  userChatId           String         @default("")
+  /**
+   * Telegram-side state: owner can disable the connection in their app.
+   */
+  isEnabled            Boolean        @default(true)
+  canReply             Boolean        @default(false)
+  canReadMessages      Boolean        @default(false)
+  connectedAt          DateTime       @default(now())
+  /**
+   * Admin-side automation toggle — OFF by default until explicitly enabled.
+   */
+  enabled              Boolean        @default(false)
+  displayName          String         @default("")
+  /**
+   * Per-account instruction override; null → TELEGRAM_PERSONAL agent default.
+   */
   instructions         String?
   knowledgeBaseId      String?
   knowledgeBase        KnowledgeBase? @relation(fields: [knowledgeBaseId], references: [id], onDelete: SetNull)
-  settings             Json     @default("{}")
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  settings             Json           @default("{}")
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
 
   @@index([tenantId])
 }

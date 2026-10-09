@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { LogOut, Menu, X, MoreHorizontal } from 'lucide-react';
 import { api, ApiError, type SessionUser } from './api';
-import { NAV_ITEMS, type NavItem } from './nav';
+import { NAV_ITEMS, homeRouteFor, type NavItem } from './nav';
 import IconChip from './components/IconChip';
 import BrandLogo from './components/BrandLogo';
 import SplashScreen from './components/SplashScreen';
@@ -24,6 +24,7 @@ import Knowledge from './pages/Knowledge';
 import Logs from './pages/Logs';
 import Handoffs from './pages/Handoffs';
 import ManualActions from './pages/ManualActions';
+import Registrations from './pages/Registrations';
 
 function initials(name: string): string {
   return (
@@ -147,6 +148,7 @@ function Shell({
   bottomItems: NavItem[];
   onLogout: () => void;
 }) {
+  const isAdmin = user.role === 'ADMIN';
   const [drawerOpen, setDrawerOpen] = useState(false);
   const location = useLocation();
   const closeDrawer = () => setDrawerOpen(false);
@@ -212,24 +214,32 @@ function Shell({
         {/* Keyed by path so a crashing page is isolated to that page and
             navigating away clears it — the shell and nav stay usable. */}
         <ErrorBoundary key={location.pathname}>
+        {/* An OPERATOR's routes are not merely hidden from the nav — the
+            admin ones are never registered, so typing the URL falls through
+            to the catch-all and lands on the CRM. The API refuses them
+            independently; this just avoids rendering a page that would only
+            fill with authorization errors. */}
         <Routes>
-          <Route path="/" element={<Overview />} />
-          <Route path="/agents" element={<Agents />} />
-          <Route path="/agents/:id" element={<AgentEdit />} />
-          <Route path="/connections" element={<Connections isAdmin={user.role === 'ADMIN'} />} />
-          <Route path="/telegram" element={<TelegramPage isAdmin={user.role === 'ADMIN'} />} />
-          <Route path="/media" element={<Media isAdmin={user.role === 'ADMIN'} />} />
-          {user.role === 'ADMIN' && <Route path="/settings" element={<Settings />} />}
-          {user.role === 'ADMIN' && (
-            <Route path="/team" element={<Team me={{ id: user.id, role: user.role }} />} />
-          )}
           <Route path="/leads" element={<Leads />} />
           <Route path="/leads/:id" element={<LeadDetail />} />
-          <Route path="/knowledge" element={<Knowledge />} />
-          <Route path="/logs" element={<Logs />} />
+          <Route path="/registrations" element={<Registrations />} />
           <Route path="/handoffs" element={<Handoffs />} />
-          <Route path="/manual-actions" element={<ManualActions />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          {isAdmin && (
+            <>
+              <Route path="/" element={<Overview />} />
+              <Route path="/agents" element={<Agents />} />
+              <Route path="/agents/:id" element={<AgentEdit />} />
+              <Route path="/connections" element={<Connections isAdmin />} />
+              <Route path="/telegram" element={<TelegramPage isAdmin />} />
+              <Route path="/media" element={<Media isAdmin />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route path="/team" element={<Team me={{ id: user.id, role: user.role }} />} />
+              <Route path="/knowledge" element={<Knowledge />} />
+              <Route path="/logs" element={<Logs />} />
+              <Route path="/manual-actions" element={<ManualActions />} />
+            </>
+          )}
+          <Route path="*" element={<Navigate to={homeRouteFor(user.role)} replace />} />
         </Routes>
         </ErrorBoundary>
       </main>

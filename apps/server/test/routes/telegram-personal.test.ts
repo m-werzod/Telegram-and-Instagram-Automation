@@ -132,6 +132,15 @@ describe('Telegram personal account (Business connection)', () => {
     prisma.lead.update.mockResolvedValue({});
     prisma.conversation.upsert.mockResolvedValue({ id: 'conv-1', tenantId: 'tenant-1', status: 'ACTIVE' });
     prisma.conversation.findFirst.mockResolvedValue({ id: 'conv-1', tenantId: 'tenant-1', status: 'ACTIVE' });
+    // The pre-send gate re-reads the conversation to check it was not excluded
+    // while the model was running; with no row it fails closed and sends
+    // nothing, which is correct but not what this test is exercising.
+    prisma.conversation.findUnique.mockResolvedValue({
+      id: 'conv-1',
+      tenantId: 'tenant-1',
+      status: 'ACTIVE',
+      metadata: {},
+    });
     prisma.conversation.update.mockResolvedValue({});
     prisma.conversationMessage.create.mockResolvedValue({ id: 'msg-1' });
     prisma.conversationMessage.findMany.mockResolvedValue([]);

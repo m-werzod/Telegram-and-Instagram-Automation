@@ -16,6 +16,8 @@ import { agentRoutes } from './api/agent-routes.js';
 import { authRoutes } from './api/auth-routes.js';
 import { connectionRoutes } from './api/connection-routes.js';
 import { crmRoutes } from './api/crm-routes.js';
+import { registrationRoutes } from './api/registration-routes.js';
+import { instructionRoutes } from './api/instruction-routes.js';
 import { knowledgeRoutes } from './api/knowledge-routes.js';
 import { legalRoutes } from './api/legal-routes.js';
 import { mediaRoutes } from './api/media-routes.js';
@@ -138,6 +140,8 @@ export async function buildApp(env: Env): Promise<FastifyInstance> {
   await app.register(connectionRoutes);
   await app.register(telegramPersonalRoutes);
   await app.register(crmRoutes);
+  await app.register(registrationRoutes);
+  await app.register(instructionRoutes);
   await app.register(knowledgeRoutes);
   await app.register(settingsRoutes);
   await app.register(teamRoutes);

@@ -90,6 +90,7 @@ describe('parseAgentSettings', () => {
       skipTrivialComments: true,
       welcomeImageMediaId: null,
       contactFallback: null,
+      stickers: { priceInquiry: null, greeting: null, thanks: null },
     });
   });
 
@@ -129,6 +130,7 @@ describe('parseAgentSettings', () => {
       skipTrivialComments: false,
       welcomeImageMediaId: 'media-9',
       contactFallback: '+998 55 252 37 37',
+      stickers: { priceInquiry: null, greeting: null, thanks: null },
     });
   });
 });
@@ -167,6 +169,7 @@ describe('applyBusinessRules', () => {
     });
     expect(verdict).toEqual({
       allowSend: false,
+      stickerId: null,
       reply: null,
       privateReplyText: null,
       imageId: null,
@@ -212,6 +215,7 @@ describe('applyBusinessRules', () => {
     });
     expect(verdict).toEqual({
       allowSend: false,
+      stickerId: null,
       reply: null,
       privateReplyText: null,
       imageId: null,
@@ -244,6 +248,7 @@ describe('applyBusinessRules', () => {
     });
     expect(verdict).toEqual({
       allowSend: false,
+      stickerId: null,
       reply: null,
       privateReplyText: null,
       imageId: null,
@@ -287,6 +292,7 @@ describe('applyBusinessRules', () => {
     });
     expect(verdict).toEqual({
       allowSend: false,
+      stickerId: null,
       reply: null,
       privateReplyText: null,
       imageId: null,
@@ -315,6 +321,7 @@ describe('applyBusinessRules', () => {
     });
     expect(verdict).toEqual({
       allowSend: true,
+      stickerId: null,
       reply: 'Delivery costs $5.',
       privateReplyText: null,
       imageId: null,

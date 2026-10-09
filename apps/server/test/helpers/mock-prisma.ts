@@ -60,6 +60,9 @@ const MODEL_NAMES = [
   'mediaAsset',
   'appSetting',
   'telegramPersonalAccount',
+  'courseRegistration',
+  'registrationEvent',
+  'ownerInstruction',
 ] as const;
 
 export type MockPrisma = Record<(typeof MODEL_NAMES)[number], MockModel> & {

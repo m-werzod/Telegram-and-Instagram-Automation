@@ -33,6 +33,8 @@ export interface PipelineInput {
   requestId: string;
   /** Extra channel context blocks (e.g. the media caption for a comment). */
   extraContext?: string[];
+  /** Which connected account handled this — stamped onto any registration. */
+  sourceAccount?: string | null;
 }
 
 export interface PipelineOutcome {
@@ -43,6 +45,8 @@ export interface PipelineOutcome {
   escalated: boolean;
   aiExecutionId?: string;
   error?: string;
+  /** Set when this turn filed a course registration. */
+  registrationId?: string;
 }
 
 const HISTORY_LIMIT = 20;
@@ -141,11 +145,15 @@ export async function runAgentPipeline(input: PipelineInput): Promise<PipelineOu
   }
   const { provider } = resolved;
 
+  // Loaded per turn, so edits in the dashboard take effect on the next
+  // message without a redeploy or a cache to invalidate.
+  const ownerInstructions = await loadOwnerInstructions(input.tenantId, input.agent.type);
   const system = buildSystemPrompt(
     input.agent,
     input.tenantName,
     input.channelKey,
     settings.contactFallback,
+    ownerInstructions,
   );
   const messages = buildMessages(history, {
     lead: input.lead,
@@ -246,6 +254,7 @@ export async function runAgentPipeline(input: PipelineInput): Promise<PipelineOu
 
   // Controlled tool executions from the validated decision (spec §21).
   const toolCtx = { tenantId: input.tenantId, aiExecutionId: exec.id, requestId: input.requestId };
+  let registrationId: string | undefined;
 
   if (input.lead) {
     const statusSuggestion = guardStatusTransition(input.lead.status, decision.leadStatusSuggestion);
@@ -293,6 +302,35 @@ export async function runAgentPipeline(input: PipelineInput): Promise<PipelineOu
     if (decision.internalNote) {
       await executeTool('createCRMNote', { leadId: input.lead.id, content: decision.internalNote }, toolCtx);
     }
+
+    // A stated intent to enrol, with the details to act on, becomes a course
+    // registration. Incomplete drafts file nothing — the agent has been told
+    // to ask for what is missing, and a row a salesperson cannot call is
+    // worse than no row.
+    if (decision.courseRegistration) {
+      const result = await executeTool(
+        'recordCourseRegistration',
+        {
+          leadId: input.lead.id,
+          conversationId: conversation.id,
+          sourceChannel: input.channelKey.startsWith('instagram') ? 'INSTAGRAM' : 'TELEGRAM',
+          sourceAccount: input.sourceAccount ?? null,
+          draft: {
+            fullName: decision.courseRegistration.fullName,
+            phone: decision.courseRegistration.phone,
+            course: decision.courseRegistration.course,
+            preferredTime: decision.courseRegistration.preferredTime,
+          },
+        },
+        toolCtx,
+      );
+      if (result.ok) {
+        const out = result.output as { registrationId?: string } | undefined;
+        if (out?.registrationId) registrationId = out.registrationId;
+      } else {
+        log.warn({ error: result.error }, 'course registration not recorded');
+      }
+    }
   }
 
   let escalated = false;
@@ -315,7 +353,7 @@ export async function runAgentPipeline(input: PipelineInput): Promise<PipelineOu
     { status, intent: decision.intent, escalated, suppressed: verdict.suppressedReason },
     'pipeline completed',
   );
-  return { status, decision, verdict, settings, escalated, aiExecutionId: exec.id };
+  return { status, decision, verdict, settings, escalated, aiExecutionId: exec.id, registrationId };
 }
 
 async function escalate(
@@ -348,6 +386,28 @@ export function guardStatusTransition(
   if (current === 'QUALIFIED' && (suggested === 'OPEN' || suggested === 'SPAM')) return null;
   if (suggested === current) return null;
   return suggested;
+}
+
+/**
+ * The owner's own rules for this agent: tenant-wide ones plus any scoped to
+ * this agent type. Read fresh each turn — a rule the owner just saved must
+ * apply to the very next message, and the list is tiny.
+ *
+ * Never throws: a failure here must degrade to "no extra rules", not kill a
+ * reply the customer is waiting for.
+ */
+async function loadOwnerInstructions(tenantId: string, agentType: Agent['type']): Promise<string[]> {
+  try {
+    const rows = await getPrisma().ownerInstruction.findMany({
+      where: { tenantId, enabled: true, OR: [{ appliesTo: null }, { appliesTo: agentType }] },
+      orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+      take: 50,
+      select: { text: true },
+    });
+    return rows.map((r) => r.text.trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 function pickQualification(decision: AgentDecision): Record<string, unknown> | undefined {

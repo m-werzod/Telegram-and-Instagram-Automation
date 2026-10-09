@@ -11,6 +11,7 @@ import {
   UserCog,
   ScrollText,
   ClipboardList,
+  GraduationCap,
   type LucideIcon,
 } from 'lucide-react';
 import type { IconTone } from './components/IconChip';
@@ -26,18 +27,32 @@ export interface NavItem {
   adminOnly?: boolean;
 }
 
-/** Single source of truth for navigation — desktop sidebar, mobile drawer, and bottom tab bar. */
+/**
+ * Single source of truth for navigation — desktop sidebar, mobile drawer, and
+ * bottom tab bar.
+ *
+ * `adminOnly` here is presentation only. The server enforces the same split
+ * independently (see `adminOnly` / `requireAdmin` in the API middleware): an
+ * operator who types an admin URL gets a 401 from the API even though the SPA
+ * also refuses to route them there.
+ */
 export const NAV_ITEMS: NavItem[] = [
-  { to: '/', label: 'Bosh sahifa', icon: LayoutDashboard, tone: 'blue', end: true, inBottomBar: true },
-  { to: '/agents', label: 'AI Agentlar', icon: Bot, tone: 'violet', inBottomBar: true },
+  { to: '/', label: 'Bosh sahifa', icon: LayoutDashboard, tone: 'blue', end: true, inBottomBar: true, adminOnly: true },
+  { to: '/agents', label: 'AI Agentlar', icon: Bot, tone: 'violet', inBottomBar: true, adminOnly: true },
   { to: '/leads', label: 'Mijozlar (CRM)', icon: Users, tone: 'amber', inBottomBar: true },
-  { to: '/telegram', label: 'Telegram', icon: Send, tone: 'cyan', inBottomBar: true },
-  { to: '/connections', label: 'Ulanishlar', icon: Plug, tone: 'green' },
+  { to: '/registrations', label: 'Kursga yozilishlar', icon: GraduationCap, tone: 'green', inBottomBar: true },
+  { to: '/telegram', label: 'Telegram', icon: Send, tone: 'cyan', inBottomBar: true, adminOnly: true },
+  { to: '/connections', label: 'Ulanishlar', icon: Plug, tone: 'green', adminOnly: true },
   { to: '/handoffs', label: "Operatorga o'tkazilgan", icon: LifeBuoy, tone: 'amber' },
-  { to: '/knowledge', label: 'Bilimlar bazasi', icon: BookOpen, tone: 'green' },
-  { to: '/media', label: 'Media · Rasmlar', icon: Image, tone: 'pink' },
+  { to: '/knowledge', label: 'Bilimlar bazasi', icon: BookOpen, tone: 'green', adminOnly: true },
+  { to: '/media', label: 'Media · Rasmlar', icon: Image, tone: 'pink', adminOnly: true },
   { to: '/team', label: 'Jamoa va biznes', icon: UserCog, tone: 'blue', adminOnly: true },
   { to: '/settings', label: 'Sozlamalar', icon: Settings, tone: 'slate', adminOnly: true },
-  { to: '/logs', label: 'Jurnal', icon: ScrollText, tone: 'slate' },
-  { to: '/manual-actions', label: "Qo'lda bajariladigan ishlar", icon: ClipboardList, tone: 'red' },
+  { to: '/logs', label: 'Jurnal', icon: ScrollText, tone: 'slate', adminOnly: true },
+  { to: '/manual-actions', label: "Qo'lda bajariladigan ishlar", icon: ClipboardList, tone: 'red', adminOnly: true },
 ];
+
+/** Where a signed-in user lands, and where an unknown route sends them. */
+export function homeRouteFor(role: 'ADMIN' | 'OPERATOR'): string {
+  return role === 'ADMIN' ? '/' : '/leads';
+}

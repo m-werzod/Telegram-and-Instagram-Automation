@@ -30,6 +30,20 @@ export const agentSettingsSchema = z
      * otherwise produces.
      */
     contactFallback: z.string().max(300).nullable().default(null),
+    /**
+     * Stickers sent alongside the reply, by intent. Telegram file ids, which
+     * must come from a real sticker — they cannot be invented, so the field
+     * stays empty until an operator pastes one in (the dashboard explains how
+     * to obtain it). An id that Telegram rejects is dropped and the text is
+     * sent on its own; a sticker is decoration and must never cost a reply.
+     */
+    stickers: z
+      .object({
+        priceInquiry: z.string().max(200).nullable().default(null),
+        greeting: z.string().max(200).nullable().default(null),
+        thanks: z.string().max(200).nullable().default(null),
+      })
+      .default({ priceInquiry: null, greeting: null, thanks: null }),
   });
 
 export type AgentSettings = z.infer<typeof agentSettingsSchema>;
@@ -45,8 +59,34 @@ export interface RuleVerdict {
   privateReplyText: string | null;
   /** Validated media asset id to send with the reply (image channels only). */
   imageId: string | null;
+  /** Configured sticker for this turn's intent, if any (Telegram only). */
+  stickerId: string | null;
   suppressedReason?: string;
   forceEscalate?: boolean;
+}
+
+/**
+ * Which configured sticker, if any, suits this turn. Price questions are the
+ * case the owner asked for; the others are there because the same mapping is
+ * the natural place for them.
+ */
+export function stickerForDecision(
+  settings: AgentSettings,
+  decision: AgentDecision,
+  channelKey: keyof typeof CHANNEL_RULES,
+): string | null {
+  // Public Instagram comments cannot carry a sticker, and a DM sticker API
+  // is a different object — Telegram only, for now.
+  if (channelKey !== 'telegram' && channelKey !== 'telegram_personal') return null;
+  const map = settings.stickers;
+  switch (decision.intent) {
+    case 'price_inquiry':
+      return map.priceInquiry?.trim() || null;
+    case 'greeting':
+      return map.greeting?.trim() || null;
+    default:
+      return null;
+  }
 }
 
 /** Channels that can carry an image alongside the reply. */
@@ -85,6 +125,7 @@ export async function applyBusinessRules(params: {
   if (decision.isSpamOrIrrelevant) {
     return {
       allowSend: false,
+      stickerId: null,
       reply: null,
       privateReplyText: null,
       imageId: null,
@@ -107,6 +148,7 @@ export async function applyBusinessRules(params: {
   if (violates(reply) || violates(privateReplyText)) {
     return {
       allowSend: false,
+      stickerId: null,
       reply: null,
       privateReplyText: null,
       imageId: null,
@@ -130,6 +172,7 @@ export async function applyBusinessRules(params: {
     if (recentOutbound >= settings.maxRepliesPerHour) {
       return {
         allowSend: false,
+        stickerId: null,
         reply: null,
         privateReplyText: null,
         imageId: null,
@@ -147,6 +190,7 @@ export async function applyBusinessRules(params: {
       if (lastOutbound && lastOutbound.content.trim() === reply) {
         return {
           allowSend: false,
+          stickerId: null,
           reply: null,
           privateReplyText: null,
           imageId: null,
@@ -175,7 +219,14 @@ export async function applyBusinessRules(params: {
   if (!reply) imageId = null;
 
   void agent;
-  return { allowSend: !!(reply || privateReplyText), reply, privateReplyText, imageId };
+  const allowSend = !!(reply || privateReplyText);
+  return {
+    allowSend,
+    reply,
+    privateReplyText,
+    imageId,
+    stickerId: allowSend ? stickerForDecision(settings, decision, channelKey) : null,
+  };
 }
 
 /**

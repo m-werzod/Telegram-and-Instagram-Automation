@@ -29,6 +29,16 @@ export interface TgMessage {
   chat: { id: number; type: 'private' | 'group' | 'supergroup' | 'channel'; username?: string; title?: string };
   date: number;
   text?: string;
+  /** Caption on a media message — carries the question when one is attached. */
+  caption?: string;
+  /**
+   * Audio the platform does not transcribe. Present so the agent can answer
+   * "please write it instead" rather than ignoring the customer entirely,
+   * which is what an unrecognised message type otherwise produces.
+   */
+  voice?: { file_id: string; duration: number };
+  audio?: { file_id: string; duration: number };
+  video_note?: { file_id: string; duration: number };
   /** Present on messages in chats of a connected personal account (Telegram Business). */
   business_connection_id?: string;
 }
@@ -230,6 +240,23 @@ export class TelegramClient {
     return this.call<boolean>('sendChatAction', {
       chat_id: chatId,
       action,
+      ...(opts.businessConnectionId ? { business_connection_id: opts.businessConnectionId } : {}),
+    });
+  }
+
+  /**
+   * Send a sticker. Works for both a bot's own chats and, with
+   * businessConnectionId, a connected personal account — the same surface the
+   * text sender uses, so a personal account's stickers go out as the owner.
+   */
+  sendSticker(
+    chatId: number | string,
+    sticker: string,
+    opts: { businessConnectionId?: string } = {},
+  ): Promise<TgMessage> {
+    return this.call<TgMessage>('sendSticker', {
+      chat_id: chatId,
+      sticker,
       ...(opts.businessConnectionId ? { business_connection_id: opts.businessConnectionId } : {}),
     });
   }

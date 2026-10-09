@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { getPrisma } from '../db/client.js';
 import { NotFoundError, ValidationError } from '../lib/errors.js';
-import { requireAdmin, requireAuth, tenantOf } from './middleware.js';
+import { adminOnly, requireAdmin, requireAuth, tenantOf } from './middleware.js';
 
 /**
  * Management of PERSONAL Telegram accounts connected to the bot via Telegram
@@ -41,6 +41,7 @@ const PUBLIC_SELECT = {
 
 export async function telegramPersonalRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('preHandler', requireAuth);
+  app.addHook('preHandler', adminOnly);
 
   app.get('/api/telegram-personal-accounts', async (req) => {
     const accounts = await getPrisma().telegramPersonalAccount.findMany({

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { getPrisma } from '../db/client.js';
 import { NotFoundError, ValidationError } from '../lib/errors.js';
 import { addNote, findMergeCandidates, mergeLeads } from '../modules/crm/service.js';
-import { requireAuth, tenantOf } from './middleware.js';
+import { requireAdmin, requireAuth, tenantOf } from './middleware.js';
 
 /** CRM API (spec §9, §26): leads, conversations, notes, manual merging. */
 export async function crmRoutes(app: FastifyInstance): Promise<void> {
@@ -112,6 +112,7 @@ export async function crmRoutes(app: FastifyInstance): Promise<void> {
             status: true,
             lastMessageAt: true,
             externalThreadId: true,
+            metadata: true,
           },
         },
         notes: { orderBy: { createdAt: 'desc' }, take: 50 },
@@ -177,6 +178,43 @@ export async function crmRoutes(app: FastifyInstance): Promise<void> {
       if (!sourceId.success) throw new ValidationError('sourceLeadId is required');
       const lead = await mergeLeads(tenantOf(req), sourceId.data, req.params.id);
       return { lead };
+    },
+  );
+
+  /**
+   * Exclude a conversation from automation, or let it resume.
+   *
+   * The owner normally does this from inside Telegram by typing /stop in the
+   * chat — the supported stand-in for pinning it, since the Bot API cannot
+   * report pinned dialogs. This is the same flag from the dashboard, so an
+   * exclusion set on a phone is visible and reversible here.
+   *
+   * Admin-only: it changes what the automation does, which is configuration
+   * rather than the CRM work an operator is employed for.
+   */
+  app.patch<{ Params: { id: string }; Body: { excluded?: boolean } }>(
+    '/api/conversations/:id/automation',
+    async (req) => {
+      requireAdmin(req);
+      const tenantId = tenantOf(req);
+      const excluded = z.boolean().safeParse(req.body?.excluded);
+      if (!excluded.success) throw new ValidationError('excluded must be true or false');
+
+      const conversation = await getPrisma().conversation.findFirst({
+        where: { id: req.params.id, tenantId },
+      });
+      if (!conversation) throw new NotFoundError('Conversation not found');
+
+      const { setConversationExcluded } = await import(
+        '../modules/channels/telegram/exclusions.js'
+      );
+      await setConversationExcluded({
+        tenantId,
+        conversationId: conversation.id,
+        excluded: excluded.data,
+        by: 'dashboard',
+      });
+      return { ok: true, excluded: excluded.data };
     },
   );
 

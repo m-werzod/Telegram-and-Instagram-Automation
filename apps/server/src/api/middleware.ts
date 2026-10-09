@@ -29,6 +29,32 @@ export function requireAdmin(req: FastifyRequest): void {
   }
 }
 
+/**
+ * Admin-only for an entire route group, as a hook.
+ *
+ * `requireAdmin(req)` called by hand inside each handler was the previous
+ * pattern, and it failed the way per-handler checks always eventually do:
+ * agent configuration, the knowledge base and the execution logs had none at
+ * all, so an OPERATOR could rewrite an agent's system instructions or delete a
+ * knowledge base through the API even though the dashboard never showed them
+ * the page. A group-level hook cannot be forgotten when a route is added.
+ *
+ * Register AFTER requireAuth so req.user is populated:
+ *   app.addHook('preHandler', requireAuth);
+ *   app.addHook('preHandler', adminOnly);
+ */
+export async function adminOnly(req: FastifyRequest, _reply: FastifyReply): Promise<void> {
+  requireAdmin(req);
+}
+
+/**
+ * Admin-only for writes; any signed-in user may read. For groups an operator
+ * legitimately needs to see but must never change.
+ */
+export async function adminOnlyWrites(req: FastifyRequest, _reply: FastifyReply): Promise<void> {
+  if (req.method !== 'GET' && req.method !== 'HEAD') requireAdmin(req);
+}
+
 export function tenantOf(req: FastifyRequest): string {
   if (!req.tenantId) throw new AuthError();
   return req.tenantId;

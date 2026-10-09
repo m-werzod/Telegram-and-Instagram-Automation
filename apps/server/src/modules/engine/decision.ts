@@ -55,6 +55,26 @@ export const agentDecisionSchema = z.object({
   /** Internal CRM note (never shown to the user). */
   internalNote: z.string().nullable(),
   /**
+   * Set ONLY when the customer has actually asked to enrol on a course — not
+   * when they merely asked a price or said hello. The presence of this object
+   * is the registration signal; a casual enquiry must leave it null, or the
+   * sales team's registration list fills with people who never applied.
+   *
+   * Fields the customer has not given yet stay null: the platform files the
+   * registration once name, phone and course are all present, and the agent
+   * asks for whatever is missing in the meantime.
+   */
+  courseRegistration: z
+    .object({
+      fullName: z.string().nullable(),
+      phone: z.string().nullable(),
+      /** Course or licence category the person is enrolling on. */
+      course: z.string().nullable(),
+      /** When they prefer to be called or to attend, if stated. */
+      preferredTime: z.string().nullable(),
+    })
+    .nullable(),
+  /**
    * Instagram Comment agent only: send the single allowed private reply (DM)
    * for this comment. Ignored on other channels.
    */

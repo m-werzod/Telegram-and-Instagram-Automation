@@ -308,12 +308,21 @@ export default function LeadDetail() {
                         : 'xabar yo‘q'}
                     </div>
                   </span>
-                  <span className={`badge ${c.status === 'HANDED_OFF' ? 'warn' : ''}`}>
-                    {c.status === 'ACTIVE'
-                      ? 'FAOL'
-                      : c.status === 'HANDED_OFF'
-                        ? 'OPERATORDA'
-                        : 'YOPILGAN'}
+                  <span className="row" style={{ gap: 5, flexWrap: 'nowrap' }}>
+                    {/* The owner's /stop in Telegram shows up here, so an
+                        unexplained silence is explained rather than mysterious. */}
+                    {(c.metadata as { aiExcluded?: boolean } | null)?.aiExcluded && (
+                      <span className="badge bad" title="Egasi bu chatda avtomatikani to'xtatgan">
+                        AI O'CHIQ
+                      </span>
+                    )}
+                    <span className={`badge ${c.status === 'HANDED_OFF' ? 'warn' : ''}`}>
+                      {c.status === 'ACTIVE'
+                        ? 'FAOL'
+                        : c.status === 'HANDED_OFF'
+                          ? 'OPERATORDA'
+                          : 'YOPILGAN'}
+                    </span>
                   </span>
                 </button>
               ))

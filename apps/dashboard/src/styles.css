@@ -554,6 +554,12 @@ details.json pre { background: #f3f5f8; padding: 10px; border-radius: 8px; overf
 
 .lead-tags { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin-top: 10px; }
 
+/* Status + assignee on a registration card: the two things an operator
+   changes all day, so they are controls on the card rather than a detail page. */
+.reg-actions { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+.reg-actions .field .name { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted-soft); }
+a.btn.small { text-decoration: none; }
+
 /* A back link is the most-tapped control on a detail page; as bare text it is
    a ~17px target sitting against the edge of the screen. */
 .back-link {
@@ -568,6 +574,23 @@ details.json pre { background: #f3f5f8; padding: 10px; border-radius: 8px; overf
 .user-row-actions { display: flex; gap: 8px; align-items: center; margin-top: 11px; }
 .user-row-actions input { flex: 1; min-width: 0; }
 .danger-label { display: none; }
+
+/* ── Owner AI instructions ──────────────────────────────────────────────── */
+.instruction-row {
+  display: flex; gap: 11px; align-items: flex-start;
+  border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 11px 12px;
+}
+.instruction-row.off { opacity: 0.55; background: #fafbfd; }
+.instruction-body { flex: 1; min-width: 0; }
+.instruction-body textarea { min-height: 52px; font-size: 13.5px; }
+.instruction-row > .toggle { margin-top: 13px; }
+
+.examples { margin-top: 14px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.examples .k {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700;
+  color: var(--muted-soft);
+}
+.examples button { text-align: left; font-weight: 400; white-space: normal; }
 
 /* ── Key/value detail rows ──────────────────────────────────────────────── */
 /* Replaces a two-column <table> for record details: a table forces a minimum
@@ -705,6 +728,14 @@ details.json pre { background: #f3f5f8; padding: 10px; border-radius: 8px; overf
   .lead-facts { gap: 5px 12px; }
   /* Two columns of extracted facts become two words per line on a phone. */
   .lead-collected { grid-template-columns: 1fr; gap: 8px; }
+
+  /* Two selects side by side leave neither readable at 375px. */
+  .instruction-row { flex-wrap: wrap; }
+  .instruction-body { flex: 1 0 100%; order: 1; }
+  .instruction-row > .toggle { margin-top: 0; }
+
+  .reg-actions { flex-direction: column; gap: 8px; }
+  .reg-actions .field { min-width: 0 !important; width: 100%; }
 
   .pager { gap: 8px; }
   .pager .muted { font-size: 12.5px; }

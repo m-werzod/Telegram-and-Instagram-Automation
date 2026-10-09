@@ -115,6 +115,8 @@ export interface Lead {
     channel: string;
     status: string;
     lastMessageAt: string | null;
+    /** Carries `aiExcluded` when the owner stopped automation in this chat. */
+    metadata?: Record<string, unknown> | null;
   }>;
   notes?: Array<{ id: string; authorType: string; content: string; createdAt: string }>;
   handoffs?: Array<{ id: string; reason: string; status: string; createdAt: string }>;

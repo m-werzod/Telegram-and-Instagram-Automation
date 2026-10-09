@@ -151,6 +151,45 @@ registerTool({
 });
 
 registerTool({
+  name: 'recordCourseRegistration',
+  timeoutMs: 10_000,
+  schema: z.object({
+    leadId: z.string().min(1),
+    conversationId: z.string().min(1).nullable(),
+    sourceChannel: z.enum(['INSTAGRAM', 'TELEGRAM']),
+    sourceAccount: z.string().max(200).nullable(),
+    draft: z.object({
+      fullName: z.string().max(200).nullable(),
+      phone: z.string().max(50).nullable(),
+      course: z.string().max(200).nullable(),
+      preferredTime: z.string().max(200).nullable(),
+    }),
+  }),
+  run: async (input, ctx) => {
+    const { recordRegistration, missingFields } = await import('../crm/registrations.js');
+    const registration = await recordRegistration(
+      {
+        tenantId: ctx.tenantId,
+        leadId: input.leadId,
+        conversationId: input.conversationId,
+        sourceChannel: input.sourceChannel,
+        sourceAccount: input.sourceAccount,
+      },
+      input.draft,
+    );
+    // Not an error: an incomplete draft is the normal mid-conversation state,
+    // and the missing fields are what the agent still has to ask for.
+    if (!registration) return { recorded: false, missing: missingFields(input.draft) };
+    return {
+      recorded: true,
+      registrationId: registration.id,
+      course: registration.course,
+      status: registration.status,
+    };
+  },
+});
+
+registerTool({
   name: 'escalateToHuman',
   timeoutMs: 10_000,
   schema: z.object({
