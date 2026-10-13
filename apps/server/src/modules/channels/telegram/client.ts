@@ -11,6 +11,27 @@ export interface TgUser {
   first_name: string;
   last_name?: string;
   username?: string;
+  /** getMe only. True when the bot may be invited to groups. */
+  can_join_groups?: boolean;
+  /**
+   * getMe only. "True, if privacy mode is disabled for the bot."
+   *
+   * This is the difference between answering questions in a group and never
+   * seeing them. Privacy mode is ON by default, and a bot with it on receives
+   * only commands addressed to it and replies to its own messages — ordinary
+   * member questions are never delivered at all, so the agent cannot be at
+   * fault for the silence. Only @BotFather can change it.
+   */
+  can_read_all_group_messages?: boolean;
+}
+
+export interface TgChat {
+  id: number;
+  type: 'private' | 'group' | 'supergroup' | 'channel';
+  username?: string;
+  title?: string;
+  /** Supergroups with topics enabled; also set on a channel's discussion group. */
+  is_forum?: boolean;
 }
 
 export interface TgWebhookInfo {
@@ -26,7 +47,8 @@ export interface TgWebhookInfo {
 export interface TgMessage {
   message_id: number;
   from?: TgUser;
-  chat: { id: number; type: 'private' | 'group' | 'supergroup' | 'channel'; username?: string; title?: string };
+  sender_chat?: TgChat;
+  chat: TgChat;
   date: number;
   text?: string;
   /** Caption on a media message — carries the question when one is attached. */
@@ -39,6 +61,17 @@ export interface TgMessage {
   voice?: { file_id: string; duration: number };
   audio?: { file_id: string; duration: number };
   video_note?: { file_id: string; duration: number };
+  /**
+   * Comment thread / forum topic this message belongs to. In a channel's
+   * linked discussion group every post's comments form one thread, and a
+   * reply sent without this lands as a loose group message instead of under
+   * the post — which is how a bot ends up looking like it ignored the comment.
+   */
+  message_thread_id?: number;
+  /** The message this one replies to; carries the channel post on comments. */
+  reply_to_message?: TgMessage;
+  /** True on the channel post Telegram copies into the discussion group. */
+  is_automatic_forward?: boolean;
   /** Present on messages in chats of a connected personal account (Telegram Business). */
   business_connection_id?: string;
 }
@@ -66,6 +99,8 @@ export interface TgUpdate {
   update_id: number;
   message?: TgMessage;
   edited_message?: TgMessage;
+  channel_post?: TgMessage;
+  edited_channel_post?: TgMessage;
   callback_query?: { id: string; from: TgUser; data?: string; message?: TgMessage };
   /** Personal account connected/disconnected/edited the business connection. */
   business_connection?: TgBusinessConnection;
@@ -77,6 +112,18 @@ export interface TgUpdate {
 
 /** Telegram sendMessage hard limit: 4096 characters after entity parsing. */
 export const TELEGRAM_MAX_MESSAGE = 4096;
+
+export const TELEGRAM_ALLOWED_UPDATES = [
+  'message',
+  'edited_message',
+  'channel_post',
+  'edited_channel_post',
+  'callback_query',
+  'business_connection',
+  'business_message',
+  'edited_business_message',
+  'deleted_business_messages',
+] as const;
 
 export class TelegramClient {
   constructor(
@@ -152,15 +199,7 @@ export class TelegramClient {
     return this.call<TgUpdate[]>('getUpdates', {
       offset: params.offset,
       timeout: params.timeout ?? 30,
-      allowed_updates: params.allowedUpdates ?? [
-        'message',
-        'edited_message',
-        'callback_query',
-        'business_connection',
-        'business_message',
-        'edited_business_message',
-        'deleted_business_messages',
-      ],
+      allowed_updates: params.allowedUpdates ?? TELEGRAM_ALLOWED_UPDATES,
     });
   }
 
@@ -177,15 +216,7 @@ export class TelegramClient {
       // An explicit allowed_updates list FILTERS OUT everything unnamed — the
       // Telegram Business update types must be listed or personal-account
       // messages silently never arrive.
-      allowed_updates: params.allowedUpdates ?? [
-        'message',
-        'edited_message',
-        'callback_query',
-        'business_connection',
-        'business_message',
-        'edited_business_message',
-        'deleted_business_messages',
-      ],
+      allowed_updates: params.allowedUpdates ?? TELEGRAM_ALLOWED_UPDATES,
       drop_pending_updates: params.dropPendingUpdates ?? false,
       ...(params.maxConnections ? { max_connections: params.maxConnections } : {}),
     });
@@ -214,17 +245,35 @@ export class TelegramClient {
   async sendMessage(
     chatId: number | string,
     text: string,
-    opts: { businessConnectionId?: string } = {},
+    opts: {
+      businessConnectionId?: string;
+      /** Comment thread or forum topic to answer inside. */
+      messageThreadId?: number;
+      /** Quote the question, the way an admin answering in a busy group does. */
+      replyToMessageId?: number;
+    } = {},
   ): Promise<TgMessage[]> {
     const parts = splitMessage(text, TELEGRAM_MAX_MESSAGE);
     const sent: TgMessage[] = [];
-    for (const part of parts) {
+    for (let i = 0; i < parts.length; i++) {
       sent.push(
         await this.call<TgMessage>('sendMessage', {
           chat_id: chatId,
-          text: part,
+          text: parts[i],
           ...(opts.businessConnectionId
             ? { business_connection_id: opts.businessConnectionId }
+            : {}),
+          ...(opts.messageThreadId ? { message_thread_id: opts.messageThreadId } : {}),
+          // Only the first part quotes the question; quoting it again on every
+          // continuation would read as three separate answers.
+          ...(i === 0 && opts.replyToMessageId
+            ? {
+                reply_parameters: {
+                  message_id: opts.replyToMessageId,
+                  // The question can be deleted while the agent is thinking.
+                  allow_sending_without_reply: true,
+                },
+              }
             : {}),
         }),
       );
@@ -235,12 +284,14 @@ export class TelegramClient {
   sendChatAction(
     chatId: number | string,
     action = 'typing',
-    opts: { businessConnectionId?: string } = {},
+    opts: { businessConnectionId?: string; messageThreadId?: number } = {},
   ): Promise<boolean> {
     return this.call<boolean>('sendChatAction', {
       chat_id: chatId,
       action,
       ...(opts.businessConnectionId ? { business_connection_id: opts.businessConnectionId } : {}),
+      // Typing shows inside the comment thread, not in the group's main view.
+      ...(opts.messageThreadId ? { message_thread_id: opts.messageThreadId } : {}),
     });
   }
 
@@ -252,12 +303,13 @@ export class TelegramClient {
   sendSticker(
     chatId: number | string,
     sticker: string,
-    opts: { businessConnectionId?: string } = {},
+    opts: { businessConnectionId?: string; messageThreadId?: number } = {},
   ): Promise<TgMessage> {
     return this.call<TgMessage>('sendSticker', {
       chat_id: chatId,
       sticker,
       ...(opts.businessConnectionId ? { business_connection_id: opts.businessConnectionId } : {}),
+      ...(opts.messageThreadId ? { message_thread_id: opts.messageThreadId } : {}),
     });
   }
 

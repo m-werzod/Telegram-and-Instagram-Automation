@@ -40,7 +40,25 @@ function initials(name: string): string {
 
 /**
  * Signed-in user + sign-out. One definition for the desktop sidebar and the
- * mobile drawer so the two can never drift apart again.
+1. GET INSTAGRAM TOKEN (5 min)
+   └─ Go to: https://developers.facebook.com/apps/
+   └─ Select your app → Instagram → "API setup" 
+   └─ Generate token for avtomaktab_turon account
+   └─ Copy the 60-day token
+
+2. CONNECT TOKEN (5 min)
+   └─ Open Dashboard: http://localhost:3000
+   └─ Go to: Ulanishlar (Connections)
+   └─ Paste token → Click "Ulash"
+   └─ Wait for: Green ✅ status showing @avtomaktab_turon
+
+3. ENABLE AGENTS (5 min)
+   └─ Go to: Agentlar (Agents)
+   └─ Enable: "Instagram Izoh Agenti" (Comments)
+   └─ Enable: "Instagram Direct Agenti" (DMs)
+   └─ Set Model: Claude Sonnet (or your preference)
+
+TOTAL TIME: ~15 minutes to full automation! ⚡ * mobile drawer so the two can never drift apart again.
  */
 function UserCard({ user, onLogout }: { user: SessionUser; onLogout: () => void }) {
   const roleLabel = user.role === 'ADMIN' ? 'Administrator' : 'Operator';

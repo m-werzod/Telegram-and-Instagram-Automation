@@ -25,6 +25,7 @@ import { opsRoutes } from './api/ops-routes.js';
 import { settingsRoutes } from './api/settings-routes.js';
 import { teamRoutes } from './api/team-routes.js';
 import { telegramPersonalRoutes } from './api/telegram-personal-routes.js';
+import { scheduledMessagesRoutes } from './api/scheduled-messages-routes.js';
 import { instagramWebhookRoutes } from './modules/channels/instagram/routes.js';
 import { telegramWebhookRoutes } from './modules/channels/telegram/routes.js';
 
@@ -139,6 +140,7 @@ export async function buildApp(env: Env): Promise<FastifyInstance> {
   await app.register(agentRoutes);
   await app.register(connectionRoutes);
   await app.register(telegramPersonalRoutes);
+  await app.register(scheduledMessagesRoutes);
   await app.register(crmRoutes);
   await app.register(registrationRoutes);
   await app.register(instructionRoutes);

@@ -28,7 +28,9 @@ import {
   splitMessage,
   TELEGRAM_MAX_MESSAGE,
   type TelegramClient,
+  type TgChat,
   type TgBusinessConnection,
+  type TgMessage,
   type TgUpdate,
 } from './client.js';
 
@@ -60,6 +62,120 @@ export function toStoredBusinessConnection(bc: TgBusinessConnection): StoredBusi
 }
 
 /**
+ * Where a reply has to go, and which rules govern it.
+ *
+ * A group is not a bigger private chat. Three things differ and each one is a
+ * visible bug when ignored:
+ *
+ *   The THREAD. In a channel's linked discussion group every post's comments
+ *   are a thread; a reply sent without message_thread_id appears as a loose
+ *   group message rather than under the post, so the commenter never sees it.
+ *
+ *   The CONVERSATION. Keying it on the chat alone makes an entire group one
+ *   conversation: every member's history bleeds together and the per-chat
+ *   hourly reply cap throttles the whole group instead of one discussion.
+ *
+ *   The RULES. In public, among people talking to each other, answering every
+ *   line is noise. telegram_group tells the agent to answer questions and keep
+ *   quiet otherwise.
+ */
+function resolveChatTarget(message: TgMessage): {
+  channelKey: 'telegram' | 'telegram_group';
+  /** Thread/topic to answer inside, if any. */
+  messageThreadId?: number;
+  /** The message to quote, so an answer is attached to its question. */
+  replyToMessageId?: number;
+  /** Conversation key — per thread in a group, per chat in private. */
+  threadKey: string;
+  isGroup: boolean;
+} {
+  const chatId = String(message.chat.id);
+  const isGroup = message.chat.type === 'group' || message.chat.type === 'supergroup';
+  if (!isGroup) {
+    return { channelKey: 'telegram', threadKey: chatId, isGroup: false };
+  }
+  const threadId = message.message_thread_id;
+  return {
+    channelKey: 'telegram_group',
+    ...(threadId ? { messageThreadId: threadId } : {}),
+    replyToMessageId: message.message_id,
+    threadKey: threadId ? `${chatId}:${threadId}` : chatId,
+    isGroup: true,
+  };
+}
+
+/**
+ * Telegram copies every channel post into the linked discussion group to open
+ * its comments. That copy is not a question — answering it would make the bot
+ * comment on each of the channel's own posts.
+ */
+function isAutoForwardedChannelPost(message: TgMessage): boolean {
+  return message.is_automatic_forward === true;
+}
+
+type BotMessageKind = 'message' | 'channel_post';
+
+interface BotMessageContext {
+  message: TgMessage;
+  kind: BotMessageKind;
+  inboundText: string;
+  actor: {
+    externalId: string;
+    username: string | null;
+    fullName: string | null;
+  };
+}
+
+function chatDisplayName(chat: TgChat): string | null {
+  return chat.title ?? (chat.username ? `@${chat.username}` : null);
+}
+
+function resolveBotMessageContext(
+  update: TgUpdate,
+  botExternalAccountId: string | null,
+): BotMessageContext | null {
+  const picked = update.message
+    ? { message: update.message, kind: 'message' as const }
+    : update.channel_post
+      ? { message: update.channel_post, kind: 'channel_post' as const }
+      : null;
+  if (!picked) return null;
+
+  const inboundText = picked.message.text ?? picked.message.caption ?? '';
+  if (!inboundText.trim()) return null;
+
+  if (picked.message.from) {
+    if (picked.message.from.is_bot || String(picked.message.from.id) === botExternalAccountId) {
+      return null;
+    }
+    return {
+      ...picked,
+      inboundText,
+      actor: {
+        externalId: String(picked.message.from.id),
+        username: picked.message.from.username ?? null,
+        fullName:
+          [picked.message.from.first_name, picked.message.from.last_name].filter(Boolean).join(' ') ||
+          null,
+      },
+    };
+  }
+
+  if (picked.kind !== 'channel_post') return null;
+
+  const sender = picked.message.sender_chat ?? picked.message.chat;
+  return {
+    ...picked,
+    inboundText,
+    actor: {
+      externalId: `chat:${sender.id}`,
+      username: sender.username ?? picked.message.chat.username ?? null,
+      fullName: chatDisplayName(sender) ?? chatDisplayName(picked.message.chat) ?? 'Telegram channel',
+    },
+  };
+}
+
+/**
  * Keep "typing…" visible for as long as the agent is thinking.
  *
  * Telegram clears the indicator after ~5 s, and generation measured 12–32 s on
@@ -75,7 +191,7 @@ export function toStoredBusinessConnection(bc: TgBusinessConnection): StoredBusi
 function startTyping(
   client: TelegramClient,
   chatId: number | string,
-  opts: { businessConnectionId?: string } = {},
+  opts: { businessConnectionId?: string; messageThreadId?: number } = {},
 ): () => void {
   let stopped = false;
   const ping = (): void => {
@@ -131,14 +247,21 @@ export async function processTelegramEvent(event: WebhookEvent): Promise<void> {
     return;
   }
 
-  const message = update.message;
-  // Only plain private-chat text messages are handled autonomously. Everything
-  // else is recorded and skipped (edited messages, callbacks, group chatter).
-  if (!message || !message.text || !message.from || message.from.is_bot) {
-    await markEvent(event.id, 'SKIPPED', 'not a processable user text message');
+  const botMessage = resolveBotMessageContext(update, connection.externalAccountId);
+  // Handle text/caption messages from private chats, groups, supergroups and channel posts.
+  if (!botMessage) {
+    await markEvent(event.id, 'SKIPPED', 'not a processable user/channel text message');
     return;
   }
-  if (message.chat.type !== 'private') {
+  const { message, inboundText, actor } = botMessage;
+  if (isAutoForwardedChannelPost(message)) {
+    await markEvent(event.id, 'SKIPPED', 'channel post auto-forwarded into the discussion group');
+    return;
+  }
+  const target = resolveChatTarget(message);
+  // Support: private chats (bot conversations) and channels (group/public)
+  const isSupportedChat = message.chat.type === 'private' || message.chat.type === 'channel' || message.chat.type === 'supergroup' || message.chat.type === 'group';
+  if (!isSupportedChat) {
     await markEvent(event.id, 'SKIPPED', `unsupported chat type: ${message.chat.type}`);
     return;
   }
@@ -150,11 +273,10 @@ export async function processTelegramEvent(event: WebhookEvent): Promise<void> {
   }
 
   // CRM identity resolution (never duplicate a person — spec §9).
-  const fullName = [message.from.first_name, message.from.last_name].filter(Boolean).join(' ');
   const lead = await findOrCreateLead(
     tenantId,
-    { channel: 'TELEGRAM', externalId: String(message.from.id), username: message.from.username ?? null },
-    { name: fullName || null, source: 'TELEGRAM' },
+    { channel: 'TELEGRAM', externalId: actor.externalId, username: actor.username },
+    { name: actor.fullName, source: 'TELEGRAM' },
   );
 
   const conversation = await prisma.conversation.upsert({
@@ -162,17 +284,25 @@ export async function processTelegramEvent(event: WebhookEvent): Promise<void> {
       tenantId_kind_externalThreadId: {
         tenantId,
         kind: 'TELEGRAM_CHAT',
-        externalThreadId: String(message.chat.id),
+        externalThreadId: target.threadKey,
       },
     },
     create: {
       tenantId,
       kind: 'TELEGRAM_CHAT',
       channel: 'TELEGRAM',
-      externalThreadId: String(message.chat.id),
+      externalThreadId: target.threadKey,
       leadId: lead.id,
       lastMessageAt: new Date(),
+      metadata: {
+        chatId: String(message.chat.id),
+        chatTitle: message.chat.title ?? null,
+        chatType: message.chat.type,
+        ...(target.messageThreadId ? { messageThreadId: target.messageThreadId } : {}),
+      },
     },
+    // A group conversation's lead is whoever spoke last; the per-person CRM
+    // identity is the Lead, resolved separately above.
     update: { lastMessageAt: new Date(), leadId: lead.id },
   });
 
@@ -187,9 +317,9 @@ export async function processTelegramEvent(event: WebhookEvent): Promise<void> {
         tenantId,
         direction: 'INBOUND',
         role: 'USER',
-        content: message.text,
+        content: inboundText,
         externalMessageId: String(message.message_id),
-        metadata: { updateId: update.update_id },
+        metadata: { updateId: update.update_id, updateKind: botMessage.kind },
       },
     });
   } catch (err) {
@@ -208,7 +338,7 @@ export async function processTelegramEvent(event: WebhookEvent): Promise<void> {
   }
 
   // Welcome image on /start (configured per agent in the dashboard).
-  if (/^\/start\b/.test(message.text)) {
+  if (/^\/start\b/.test(inboundText)) {
     const welcomeImageId = parseAgentSettings(agent).welcomeImageMediaId;
     if (welcomeImageId) {
       await sendAgentImage({
@@ -224,7 +354,9 @@ export async function processTelegramEvent(event: WebhookEvent): Promise<void> {
   }
 
   // Typing starts BEFORE generation, not after it — see startTyping().
-  const stopTyping = startTyping(getTelegramClient(connection), message.chat.id);
+  const stopTyping = startTyping(getTelegramClient(connection), message.chat.id, {
+    ...(target.messageThreadId ? { messageThreadId: target.messageThreadId } : {}),
+  });
   let outcome;
   try {
     outcome = await runAgentPipeline({
@@ -233,11 +365,33 @@ export async function processTelegramEvent(event: WebhookEvent): Promise<void> {
       agent,
       conversationId: conversation.id,
       lead,
-      channelKey: 'telegram',
-      inboundText: message.text!,
-      username: message.from.username ?? null,
+      channelKey: target.channelKey,
+      inboundText,
+      username: actor.username,
       requestId,
       sourceAccount: connection.displayName,
+      // Who is speaking and where, so the agent answers one person in a room
+      // rather than addressing "the chat".
+      ...(target.isGroup
+        ? {
+            extraContext: [
+              [
+                `<group_context>`,
+                `chat: ${message.chat.title ?? message.chat.id} (${message.chat.type})`,
+                `asked by: ${actor.fullName ?? actor.username ?? 'a member'}${actor.username ? ` (@${actor.username})` : ''}`,
+                target.messageThreadId
+                  ? 'This is a comment thread under a channel post.'
+                  : 'This is the main group chat.',
+                message.reply_to_message?.text
+                  ? `They are replying to: "${message.reply_to_message.text.slice(0, 300)}"`
+                  : '',
+                `</group_context>`,
+              ]
+                .filter(Boolean)
+                .join(String.fromCharCode(10)),
+            ],
+          }
+        : {}),
     });
   } finally {
     stopTyping();
@@ -255,6 +409,7 @@ export async function processTelegramEvent(event: WebhookEvent): Promise<void> {
         client,
         chatId: message.chat.id,
         stickerId: outcome.verdict.stickerId,
+        ...(target.messageThreadId ? { messageThreadId: target.messageThreadId } : {}),
         log,
       });
     }
@@ -266,7 +421,12 @@ export async function processTelegramEvent(event: WebhookEvent): Promise<void> {
       if (!(await claimIdempotency(tenantId, key))) continue;
       let sent;
       try {
-        sent = await client.sendMessage(message.chat.id, parts[i]!);
+        sent = await client.sendMessage(message.chat.id, parts[i]!, {
+          // Without the thread id a comment-thread answer lands in the group's
+          // main view instead of under the post, where the asker never sees it.
+          ...(target.messageThreadId ? { messageThreadId: target.messageThreadId } : {}),
+          ...(target.replyToMessageId ? { replyToMessageId: target.replyToMessageId } : {}),
+        });
       } catch (err) {
         if (isRetryable(err)) {
           await releaseIdempotency(tenantId, key);
@@ -803,11 +963,13 @@ async function sendStickerSafely(params: {
   chatId: number;
   stickerId: string;
   businessConnectionId?: string;
+  messageThreadId?: number;
   log: ReturnType<typeof childLogger>;
 }): Promise<void> {
   try {
     await params.client.sendSticker(params.chatId, params.stickerId, {
       ...(params.businessConnectionId ? { businessConnectionId: params.businessConnectionId } : {}),
+      ...(params.messageThreadId ? { messageThreadId: params.messageThreadId } : {}),
     });
   } catch (err) {
     params.log.warn(

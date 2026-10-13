@@ -147,6 +147,36 @@ export async function connectTelegram(tenantId: string, botToken: string): Promi
   //    first connect). Per-field best effort — nothing here can fail connect.
   await applyTelegramProfile(connection, readTelegramProfile(connection));
 
+  // Privacy mode: the single reason a bot "ignores" a group.
+  //
+  // It is ON by default, and a bot with it on is never DELIVERED ordinary
+  // member messages at all — only commands addressed to it and replies to its
+  // own messages. No amount of agent configuration can fix that, and nothing
+  // surfaces an error: the questions simply never arrive. getMe reports it, so
+  // the platform states it plainly instead of letting the owner conclude the
+  // AI is broken. Only @BotFather can change it.
+  if (me.can_read_all_group_messages === false) {
+    await upsertManualAction(tenantId, {
+      dedupKey: 'telegram-group-privacy-mode',
+      platform: 'Telegram',
+      title: `Turn OFF privacy mode so ${me.username ? `@${me.username}` : 'the bot'} can answer questions in groups`,
+      officialUrl: 'https://core.telegram.org/bots/features#privacy-mode',
+      steps: [
+        'Right now this bot does NOT receive ordinary messages in groups. Telegram only delivers it commands addressed to it (/start@bot) and replies to its own messages — so questions members ask are never seen by the platform at all.',
+        `Open Telegram → @BotFather → /mybots → ${me.username ? `@${me.username}` : 'your bot'} → Bot Settings → Group Privacy → Turn off.`,
+        'BotFather will confirm with "Privacy mode is disabled for <bot>".',
+        'Remove the bot from the group and add it again — Telegram applies the new setting on the next join, not to an existing membership.',
+        'Alternative, if you would rather leave privacy mode on: make the bot an ADMIN of the group. Admin bots receive all messages regardless of the setting.',
+        "For a channel's comments: the bot must be in the linked DISCUSSION GROUP (the one comments live in), not only in the channel.",
+      ],
+      expectedResult:
+        'The Connections page stops reporting "privacy mode ON", and a question typed by any member in the group is answered.',
+      whatToReturn: 'Nothing — the platform re-checks on every health check and resolves this task by itself.',
+    });
+  } else if (me.can_read_all_group_messages === true) {
+    await resolveManualAction(tenantId, 'telegram-group-privacy-mode');
+  }
+
   // The Bot API cannot set a bot's own avatar — only @BotFather can.
   const botHandleForAvatar = me.username ? `@${me.username}` : 'your bot';
   await upsertManualAction(tenantId, {
@@ -502,11 +532,42 @@ export async function checkTelegramHealth(connection: ChannelConnection): Promis
       personalDetail = 'personal account: legacy connection — reconnect it in Telegram to manage it here';
     }
 
+    // Re-read privacy mode on every check: it is changed in @BotFather, not
+    // here, so this is the only way the dashboard learns it was fixed.
+    let groupDetail = '';
+    try {
+      const self = await client.getMe();
+      if (self.can_read_all_group_messages === false) {
+        groupDetail =
+          '; GROUPS: privacy mode is ON — member questions in groups are never delivered to this bot (fix in @BotFather → Bot Settings → Group Privacy → Turn off, then re-add the bot to the group)';
+        await upsertManualAction(connection.tenantId, {
+          dedupKey: 'telegram-group-privacy-mode',
+          platform: 'Telegram',
+          title: 'Turn OFF privacy mode so the bot can answer questions in groups',
+          officialUrl: 'https://core.telegram.org/bots/features#privacy-mode',
+          steps: [
+            'Telegram is not delivering ordinary group messages to this bot, so group questions cannot be answered.',
+            '@BotFather → /mybots → this bot → Bot Settings → Group Privacy → Turn off.',
+            'Then remove the bot from the group and add it again.',
+          ],
+          expectedResult: 'Group questions are answered.',
+          whatToReturn: 'Nothing — this resolves itself on the next health check.',
+        }).catch(() => undefined);
+      } else if (self.can_read_all_group_messages === true) {
+        groupDetail = '; groups: privacy mode OFF (can read group messages)';
+        await resolveManualAction(connection.tenantId, 'telegram-group-privacy-mode').catch(
+          () => undefined,
+        );
+      }
+    } catch {
+      // Already proven reachable above; a second failure is not worth failing on.
+    }
+
     return {
       status: 'CONNECTED',
       detail: polling
-        ? `mode: long-polling (no public URL needed); ${personalDetail}`
-        : `mode: webhook; pending updates: ${info.pending_update_count}; ${personalDetail}`,
+        ? `mode: long-polling (no public URL needed); ${personalDetail}${groupDetail}`
+        : `mode: webhook; pending updates: ${info.pending_update_count}; ${personalDetail}${groupDetail}`,
     };
   } catch (err) {
     return { status: 'DEGRADED', detail: `getWebhookInfo failed: ${errorMessage(err)}` };

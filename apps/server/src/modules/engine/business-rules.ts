@@ -77,7 +77,13 @@ export function stickerForDecision(
 ): string | null {
   // Public Instagram comments cannot carry a sticker, and a DM sticker API
   // is a different object — Telegram only, for now.
-  if (channelKey !== 'telegram' && channelKey !== 'telegram_personal') return null;
+  if (
+    channelKey !== 'telegram' &&
+    channelKey !== 'telegram_group' &&
+    channelKey !== 'telegram_personal'
+  ) {
+    return null;
+  }
   const map = settings.stickers;
   switch (decision.intent) {
     case 'price_inquiry':
@@ -93,6 +99,7 @@ export function stickerForDecision(
 const IMAGE_CHANNELS: ReadonlySet<keyof typeof CHANNEL_RULES> = new Set([
   'instagram_dm',
   'telegram',
+  'telegram_group',
   'telegram_personal',
 ] as const);
 

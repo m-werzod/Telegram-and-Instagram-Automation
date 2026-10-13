@@ -90,6 +90,7 @@ async function main(): Promise<void> {
       void runAIKeyHealthCheck().catch(() => undefined);
       void recoverStuckEvents().catch(() => undefined);
       void pruneOldRecords().catch(() => undefined);
+      void enqueueScheduledMessages().catch(() => undefined);
     },
     15 * 60 * 1000,
   );
@@ -163,6 +164,23 @@ async function runHealthChecks(): Promise<void> {
       }
     } catch {
       // health check failures are recorded on the next successful pass
+    }
+  }
+}
+
+async function enqueueScheduledMessages(): Promise<void> {
+  const { getQueue } = await import('./queue/index.js');
+  const { findDueScheduledMessages } = await import('./modules/telegram-scheduled/service.js');
+
+  const dueMessages = await findDueScheduledMessages();
+  const queue = getQueue();
+
+  for (const message of dueMessages) {
+    try {
+      await queue.enqueue('scheduled-message:send', { scheduledMessageId: message.id });
+    } catch (err) {
+      // Log but don't fail — other messages may still need to be queued
+      console.error(`Failed to enqueue scheduled message ${message.id}:`, err);
     }
   }
 }

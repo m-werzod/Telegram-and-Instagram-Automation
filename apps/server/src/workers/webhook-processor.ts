@@ -59,4 +59,9 @@ export function registerWorkers(queue: JobQueue): void {
     const { ingestDocument } = await import('../modules/knowledge/service.js');
     await ingestDocument(documentId, tenantId);
   });
+
+  queue.registerHandler('scheduled-message:send', async ({ scheduledMessageId }) => {
+    const { sendScheduledMessage } = await import('../modules/telegram-scheduled/service.js');
+    await sendScheduledMessage(scheduledMessageId);
+  });
 }

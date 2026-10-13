@@ -14,6 +14,7 @@
 export interface JobPayloads {
   'webhook:process': { webhookEventId: string };
   'knowledge:ingest': { documentId: string; tenantId: string };
+  'scheduled-message:send': { scheduledMessageId: string };
 }
 
 export type JobName = keyof JobPayloads;

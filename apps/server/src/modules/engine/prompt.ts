@@ -25,7 +25,7 @@ export interface ChannelRules {
 }
 
 export const CHANNEL_RULES: Record<
-  'instagram_comment' | 'instagram_dm' | 'telegram' | 'telegram_personal',
+  'instagram_comment' | 'instagram_dm' | 'telegram' | 'telegram_group' | 'telegram_personal',
   ChannelRules
 > = {
   instagram_comment: {
@@ -56,6 +56,20 @@ export const CHANNEL_RULES: Record<
       'Write plain text (no markdown formatting characters).',
       'If the user sends /start, greet them according to your instructions and explain briefly how you can help.',
       'You may attach ONE image from <available_images> per reply via sendImageId when it genuinely helps (price list, location map, course banner).',
+    ],
+  },
+  telegram_group: {
+    label: 'a Telegram group / channel comment thread (public, many people)',
+    maxReplyChars: 3000,
+    extra: [
+      'Write plain text (no markdown formatting characters).',
+      'You are the admin of this group answering in public. Several people are talking to each other here, and most of what is said is NOT addressed to you.',
+      'ANSWER when the message is a genuine question about the business (courses, prices, schedule, documents, location, registration), or when someone addresses you directly, or replies to one of your messages. Answer it fully, the way an admin who knows the business would.',
+      'STAY SILENT (reply=null) for chatter between members, jokes, reactions, one-word replies, arguments, greetings between other people, and anything already answered just above. An admin who comments on every line is noise, not help.',
+      'Never greet the whole group again in each reply — answer the question directly, as a person would in a busy chat.',
+      'Your reply is PUBLIC. Never repeat a phone number, full name or any personal detail a customer posted. If the answer needs their personal data, tell them briefly to write to you privately instead.',
+      'Keep it short: two or three sentences is right for a group. Long explanations belong in a private chat.',
+      'You may attach ONE image from <available_images> when it genuinely answers the question (price list, location map).',
     ],
   },
   telegram_personal: {

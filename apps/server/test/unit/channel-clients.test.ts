@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  TELEGRAM_ALLOWED_UPDATES,
   TELEGRAM_MAX_MESSAGE,
   TelegramClient,
   splitMessage,
@@ -209,6 +210,20 @@ describe('TelegramClient', () => {
       expect(body.text.length).toBeLessThanOrEqual(TELEGRAM_MAX_MESSAGE);
     }
     expect(nonWs(bodies.map((b) => b.text).join(''))).toBe(nonWs(text));
+  });
+
+  it('requests channel posts in the default update allow-list', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ ok: true, result: true }));
+
+    await client().setWebhook({ url: 'https://app.example/tg', secretToken: 'secret' });
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    const body = JSON.parse((init as RequestInit).body as string) as {
+      allowed_updates: string[];
+    };
+    expect(body.allowed_updates).toEqual([...TELEGRAM_ALLOWED_UPDATES]);
+    expect(body.allowed_updates).toContain('channel_post');
+    expect(body.allowed_updates).toContain('edited_channel_post');
   });
 
   it('wraps a network failure as a retryable ExternalApiError', async () => {

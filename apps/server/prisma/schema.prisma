@@ -40,6 +40,7 @@ model Tenant {
   telegramPersonalAccounts TelegramPersonalAccount[]
   courseRegistrations      CourseRegistration[]
   ownerInstructions        OwnerInstruction[]
+  scheduledMessages        ScheduledMessage[]
 }
 
 enum UserRole {
@@ -775,6 +776,27 @@ model TelegramPersonalAccount {
   updatedAt            DateTime       @updatedAt
 
   @@index([tenantId])
+}
+
+// Scheduled messages for Telegram channels (morning/evening greetings, etc.)
+model ScheduledMessage {
+  id               String   @id @default(cuid())
+  tenantId         String
+  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  channel          String   // "telegram" | "instagram"
+  channelId        String   // Telegram chat_id or Instagram account ID
+  messageTemplate  String   // Message text (can include placeholders)
+  cronExpression   String   // Cron format: "0 8 * * *" for 8 AM daily
+  enabled          Boolean  @default(true)
+  nextRunAt        DateTime? // When this message should send next
+  lastRunAt        DateTime? // When it last ran
+  runsCount        Int      @default(0) // Total successful sends
+  metadata         Json     @default("{}") // Custom data
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([tenantId, channel, enabled])
+  @@index([nextRunAt])
 }
 
 // Generic idempotency guard for side effects (e.g. "reply to comment X", "private reply to comment X").
