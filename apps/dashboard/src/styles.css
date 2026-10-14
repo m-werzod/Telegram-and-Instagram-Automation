@@ -347,6 +347,10 @@ a.btn.install-go:hover { text-decoration: none; filter: brightness(1.05); }
 .install-diag summary::-webkit-details-marker { display: none; }
 .install-diag summary::before { content: '▸ '; }
 .install-diag[open] summary::before { content: '▾ '; }
+.trouble-list { margin: 8px 0 0; padding-left: 18px; }
+.trouble-list li { margin-bottom: 8px; line-height: 1.6; font-size: 13px; }
+.trouble-list li:last-child { margin-bottom: 0; }
+
 .install-diag .mono {
   margin-top: 7px; background: #f3f5f8; border-radius: 8px; padding: 9px 11px;
   font-size: 11.5px; color: var(--muted); line-height: 1.7;

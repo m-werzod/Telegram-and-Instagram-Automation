@@ -69,10 +69,23 @@ function detectPlatform(): Platform {
   // Android has never sent.
   const namedInApp = /Instagram|FBAN|FBAV|FB_IAB|Line\/|MicroMessenger|BytedanceWebview|TikTok/.test(ua);
   const androidWebview = android && (/;\s*wv\)/.test(ua) || /Version\/\d+\.\d+\s+Chrome/.test(ua));
-  const iosWebview = ios && !/Safari/.test(ua) && !/CriOS|FxiOS|EdgiOS/.test(ua);
-  if (namedInApp || androidWebview || iosWebview) return ios ? 'in-app-ios' : 'in-app-android';
+  if (namedInApp || androidWebview) return ios ? 'in-app-ios' : 'in-app-android';
 
-  if (ios) return /CriOS|FxiOS|EdgiOS/.test(ua) ? 'ios-other' : 'ios-safari';
+  if (ios) {
+    // A real third-party iOS browser says so honestly, and all of them can Add
+    // to Home Screen since iOS 16.4. An in-app WebView never fakes these.
+    if (/CriOS|FxiOS|EdgiOS/.test(ua)) return 'ios-other';
+
+    // Everything else on iOS is decided by CAPABILITY, not by the user agent.
+    // WKWebView copies Safari's UA by default, so string matching cannot tell
+    // Telegram's in-app browser from Safari — the same trap that made the
+    // Android detection wrong. `navigator.standalone` is the honest signal:
+    // Safari defines it (false while browsing, true from the home screen) and
+    // a WebView does not define it at all.
+    const standalone = (navigator as unknown as { standalone?: boolean }).standalone;
+    if (typeof standalone === 'undefined') return 'in-app-ios';
+    return 'ios-safari';
+  }
   if (android) return 'android';
   return 'desktop';
 }
@@ -145,7 +158,16 @@ function PhoneDiagram({ spot }: { spot: 'bottom' | 'top-right' }) {
   );
 }
 
-function stepsFor(platform: Platform): { title: string; intro: string; steps: Step[]; note?: string } {
+interface Guide {
+  title: string;
+  intro: string;
+  steps: Step[];
+  note?: string;
+  /** Real reasons the option is absent, none of them this site's doing. */
+  troubleshoot?: React.ReactNode[];
+}
+
+function stepsFor(platform: Platform): Guide {
   switch (platform) {
     case 'ios-safari':
       return {
@@ -166,6 +188,20 @@ function stepsFor(platform: Platform): { title: string; intro: string; steps: St
           { icon: Check, text: <>O‘ng yuqoridagi <strong>“Add”</strong> ni bosing. Tamom.</> },
         ],
         note: 'Apple veb-sahifaga o‘zi o‘rnatishga ruxsat bermaydi — iPhone’da faqat shu yo‘l bor. Android’da esa bir bosishda o‘rnatiladi.',
+        troubleshoot: [
+          <>
+            <strong>“Add to Home Screen” ko‘rinmayaptimi?</strong> Ro‘yxatni oxirigacha suring va{' '}
+            <strong>“Edit Actions”</strong> ni bosing — u yerdan shu bandni qo‘shib qo‘ying.
+          </>,
+          <>
+            <strong>Private rejimdamisiz?</strong> Maxfiy (Private) oynada Apple bu bandni umuman
+            ko‘rsatmaydi. Oddiy oynada oching.
+          </>,
+          <>
+            <strong>Ulashish tugmasi Safari’ning o‘zida</strong> — ekranning pastidagi panelda.
+            Sahifa ichidagi “share” tugmasi emas.
+          </>,
+        ],
       };
     case 'ios-other':
       return {
@@ -450,14 +486,28 @@ export default function InstallAppButton({
                   ))}
                 </ol>
 
-                {(platform === 'in-app-android' || platform === 'in-app-ios') && (
+                {(platform === 'in-app-android' ||
+                  platform === 'in-app-ios' ||
+                  platform === 'ios-safari' ||
+                  platform === 'ios-other') && (
                   <button
-                    className={platform === 'in-app-ios' ? 'primary install-go' : 'install-go'}
+                    className={platform === 'ios-safari' ? 'install-go' : 'primary install-go'}
                     onClick={copyLink}
                   >
                     {copied ? <Check size={16} /> : <Copy size={16} />}
                     {copied ? 'Nusxalandi — brauzerga joylashtiring' : 'Havolani nusxalash'}
                   </button>
+                )}
+
+                {guide.troubleshoot && (
+                  <details className="install-diag" style={{ marginTop: 12 }}>
+                    <summary>“Add to Home Screen” topilmayaptimi?</summary>
+                    <ul className="trouble-list">
+                      {guide.troubleshoot.map((t, i) => (
+                        <li key={i}>{t}</li>
+                      ))}
+                    </ul>
+                  </details>
                 )}
 
                 {guide.note && (
