@@ -72,6 +72,16 @@ async function main(): Promise<void> {
     logger.warn({ err: errorMessage(err) }, 'failed to resume telegram polling');
   }
 
+  // The staff CRM bot is a separate bot on its own transport: if its token is
+  // missing or rejected it logs and stays off, never affecting the
+  // customer-facing automation.
+  try {
+    const { startCrmBot } = await import('./modules/crm-bot/polling.js');
+    await startCrmBot();
+  } catch (err) {
+    logger.warn({ err: errorMessage(err) }, 'CRM bot failed to start');
+  }
+
   // Rescue a key saved into the wrong provider's slot, THEN surface a
   // missing/rejected one — in that order, since the repair decides the answer.
   // Both run on boot rather than up to a housekeeping interval later: with no
@@ -101,6 +111,8 @@ async function main(): Promise<void> {
     clearInterval(housekeeping);
     const { stopAllPolling } = await import('./modules/channels/telegram/polling.js');
     await stopAllPolling().catch(() => undefined);
+    const { stopCrmBot } = await import('./modules/crm-bot/polling.js');
+    await stopCrmBot().catch(() => undefined);
     await app.close().catch(() => undefined);
     await queue.stop().catch(() => undefined);
     await disconnectPrisma().catch(() => undefined);

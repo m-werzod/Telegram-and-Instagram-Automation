@@ -44,6 +44,11 @@ export interface TgWebhookInfo {
   allowed_updates?: string[];
 }
 
+/** Telegram inline keyboard — rows of buttons carrying a callback payload. */
+export interface InlineKeyboard {
+  inline_keyboard: Array<Array<{ text: string; callback_data?: string; url?: string }>>;
+}
+
 export interface TgMessage {
   message_id: number;
   from?: TgUser;
@@ -251,6 +256,8 @@ export class TelegramClient {
       messageThreadId?: number;
       /** Quote the question, the way an admin answering in a busy group does. */
       replyToMessageId?: number;
+      /** Inline keyboard, for menu-driven bots. */
+      replyMarkup?: InlineKeyboard;
     } = {},
   ): Promise<TgMessage[]> {
     const parts = splitMessage(text, TELEGRAM_MAX_MESSAGE);
@@ -264,6 +271,10 @@ export class TelegramClient {
             ? { business_connection_id: opts.businessConnectionId }
             : {}),
           ...(opts.messageThreadId ? { message_thread_id: opts.messageThreadId } : {}),
+          // Buttons belong on the LAST part, where the reader ends up.
+          ...(i === parts.length - 1 && opts.replyMarkup
+            ? { reply_markup: opts.replyMarkup }
+            : {}),
           // Only the first part quotes the question; quoting it again on every
           // continuation would read as three separate answers.
           ...(i === 0 && opts.replyToMessageId
@@ -311,6 +322,48 @@ export class TelegramClient {
       ...(opts.businessConnectionId ? { business_connection_id: opts.businessConnectionId } : {}),
       ...(opts.messageThreadId ? { message_thread_id: opts.messageThreadId } : {}),
     });
+  }
+
+  /**
+   * Replace a message in place. How a menu bot navigates without filling the
+   * chat with a new copy of the list on every tap.
+   */
+  editMessageText(
+    chatId: number | string,
+    messageId: number,
+    text: string,
+    opts: { replyMarkup?: InlineKeyboard } = {},
+  ): Promise<TgMessage | boolean> {
+    return this.call<TgMessage | boolean>('editMessageText', {
+      chat_id: chatId,
+      message_id: messageId,
+      text,
+      ...(opts.replyMarkup ? { reply_markup: opts.replyMarkup } : {}),
+    });
+  }
+
+  /**
+   * Acknowledge a button press. Without this the client spins on the button
+   * for a few seconds and the bot feels broken even when it worked.
+   */
+  answerCallbackQuery(
+    callbackQueryId: string,
+    opts: { text?: string; showAlert?: boolean } = {},
+  ): Promise<boolean> {
+    return this.call<boolean>('answerCallbackQuery', {
+      callback_query_id: callbackQueryId,
+      ...(opts.text ? { text: opts.text } : {}),
+      ...(opts.showAlert ? { show_alert: true } : {}),
+    });
+  }
+
+  /**
+   * Delete a message. Used to remove a password the moment it has been
+   * checked, so it does not sit in the chat history. Bots may delete incoming
+   * messages in private chats; failures are not worth propagating.
+   */
+  deleteMessage(chatId: number | string, messageId: number): Promise<boolean> {
+    return this.call<boolean>('deleteMessage', { chat_id: chatId, message_id: messageId });
   }
 
   setMyCommands(commands: Array<{ command: string; description: string }>): Promise<boolean> {

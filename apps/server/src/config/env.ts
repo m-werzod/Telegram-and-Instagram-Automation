@@ -70,6 +70,8 @@ const envSchema = z.object({
   // Telegram
   /** Optional: seed the Telegram connection from env instead of the dashboard. */
   TELEGRAM_BOT_TOKEN: z.string().optional(),
+  /** Separate bot for the staff CRM (course registrations). Optional. */
+  TELEGRAM_CRM_BOT_TOKEN: z.string().optional(),
 
   // Initial admin credentials (used by prisma seed only)
   ADMIN_LOGIN: z.string().min(1).default('Admin'),

@@ -180,6 +180,18 @@ registerTool({
     // Not an error: an incomplete draft is the normal mid-conversation state,
     // and the missing fields are what the agent still has to ask for.
     if (!registration) return { recorded: false, missing: missingFields(input.draft) };
+
+    // Tell the staff bot straight away. Best effort and deliberately not
+    // awaited into the result: a notification failure must never undo a
+    // registration that was successfully filed.
+    void (async () => {
+      const { getCrmBotClient } = await import('../crm-bot/polling.js');
+      const client = getCrmBotClient();
+      if (!client) return;
+      const { notifyNewRegistration } = await import('../crm-bot/service.js');
+      await notifyNewRegistration({ tenantId: ctx.tenantId, client }, registration);
+    })().catch(() => undefined);
+
     return {
       recorded: true,
       registrationId: registration.id,

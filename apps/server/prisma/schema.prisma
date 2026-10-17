@@ -40,6 +40,7 @@ model Tenant {
   telegramPersonalAccounts TelegramPersonalAccount[]
   courseRegistrations      CourseRegistration[]
   ownerInstructions        OwnerInstruction[]
+  crmBotSessions           CrmBotSession[]
   scheduledMessages        ScheduledMessage[]
 }
 
@@ -66,6 +67,7 @@ model User {
   sessions              AuthSession[]
   assignedLeads         Lead[]               @relation("AssignedLeads")
   assignedRegistrations CourseRegistration[] @relation("AssignedRegistrations")
+  crmBotSessions        CrmBotSession[]
 
   @@index([tenantId])
 }
@@ -501,6 +503,50 @@ model CrmNote {
  * Scoped to the tenant, optionally narrowed to one channel, so the owner can
  * say something on Telegram that does not apply to Instagram.
  */
+/**
+ * Someone signed in to the CRM bot from Telegram.
+ * The bot asks for the SAME login and password as the dashboard and checks
+ * them against the User table, so there is no second password to keep in sync
+ * and no shared secret living in the code: change it in the dashboard and the
+ * bot changes with it. The row doubles as the rate limiter — it is created on
+ * the first attempt, with userId still null, so repeated guesses from one
+ * Telegram account are counted even before anyone succeeds.
+ */
+model CrmBotSession {
+  id             String  @id @default(cuid())
+  tenantId       String
+  tenant         Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /**
+   * Telegram account using the bot — one session each.
+   */
+  telegramUserId String  @unique
+  telegramChatId String
+  telegramName   String?
+  /**
+   * Null until a correct login and password have been given.
+   */
+  userId         String?
+  user           User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  authenticatedAt DateTime?
+  lastSeenAt      DateTime  @default(now())
+  /**
+   * Set when an admin revokes it, or the person signs out.
+   */
+  revokedAt       DateTime?
+
+  /**
+   * Consecutive wrong passwords; reset on success.
+   */
+  failedAttempts Int       @default(0)
+  lockedUntil    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, userId])
+}
+
 model OwnerInstruction {
   id        String     @id @default(cuid())
   tenantId  String
@@ -780,20 +826,20 @@ model TelegramPersonalAccount {
 
 // Scheduled messages for Telegram channels (morning/evening greetings, etc.)
 model ScheduledMessage {
-  id               String   @id @default(cuid())
-  tenantId         String
-  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  channel          String   // "telegram" | "instagram"
-  channelId        String   // Telegram chat_id or Instagram account ID
-  messageTemplate  String   // Message text (can include placeholders)
-  cronExpression   String   // Cron format: "0 8 * * *" for 8 AM daily
-  enabled          Boolean  @default(true)
-  nextRunAt        DateTime? // When this message should send next
-  lastRunAt        DateTime? // When it last ran
-  runsCount        Int      @default(0) // Total successful sends
-  metadata         Json     @default("{}") // Custom data
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id              String    @id @default(cuid())
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  channel         String // "telegram" | "instagram"
+  channelId       String // Telegram chat_id or Instagram account ID
+  messageTemplate String // Message text (can include placeholders)
+  cronExpression  String // Cron format: "0 8 * * *" for 8 AM daily
+  enabled         Boolean   @default(true)
+  nextRunAt       DateTime? // When this message should send next
+  lastRunAt       DateTime? // When it last ran
+  runsCount       Int       @default(0) // Total successful sends
+  metadata        Json      @default("{}") // Custom data
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@index([tenantId, channel, enabled])
   @@index([nextRunAt])

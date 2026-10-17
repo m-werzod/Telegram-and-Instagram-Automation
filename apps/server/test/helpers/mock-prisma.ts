@@ -63,6 +63,7 @@ const MODEL_NAMES = [
   'courseRegistration',
   'registrationEvent',
   'ownerInstruction',
+  'crmBotSession',
 ] as const;
 
 export type MockPrisma = Record<(typeof MODEL_NAMES)[number], MockModel> & {
