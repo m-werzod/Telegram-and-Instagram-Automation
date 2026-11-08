@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { getPrisma } from '../db/client.js';
 import { NotFoundError, ValidationError } from '../lib/errors.js';
 import { requireAdmin, requireAuth, tenantOf } from './middleware.js';
+import { AI_KEY_ACTION_KEY } from '../modules/ai/health.js';
 
 const eventStatusFilter = z.enum([
   'RECEIVED',
@@ -148,6 +149,73 @@ export async function opsRoutes(app: FastifyInstance): Promise<void> {
       return { ok: true };
     },
   );
+
+  /**
+   * Is the AI actually able to answer right now?
+   *
+   * Open to any signed-in user and deliberately cheap, because the dashboard
+   * polls it to decide whether to show the "automation is down" banner. The
+   * outage this exists for lasted four days: the platform had detected the
+   * expired key and raised a task for it, but that task sits on a page nobody
+   * opens, so the owner experienced it as "Instagram is broken" rather than
+   * "the API key expired". A verdict nobody sees is not a verdict.
+   */
+  app.get('/api/ai-status', async (req) => {
+    const tenantId = tenantOf(req);
+    const prisma = getPrisma();
+    const since = new Date(Date.now() - 24 * 3600_000);
+
+    const [action, failed, succeeded, lastFailure] = await Promise.all([
+      prisma.manualAction.findFirst({
+        where: { tenantId, dedupKey: AI_KEY_ACTION_KEY, status: 'PENDING' },
+        select: { title: true, createdAt: true },
+      }),
+      prisma.aIExecution.count({ where: { tenantId, status: 'FAILED', createdAt: { gte: since } } }),
+      prisma.aIExecution.count({ where: { tenantId, status: 'SUCCEEDED', createdAt: { gte: since } } }),
+      prisma.aIExecution.findFirst({
+        where: { tenantId, status: 'FAILED' },
+        orderBy: { createdAt: 'desc' },
+        select: { error: true, createdAt: true },
+      }),
+    ]);
+
+    // Unanswered customers are the number that matters, not the error count.
+    const stranded = await prisma.webhookEvent.count({
+      where: { tenantId, status: 'DEAD_LETTER', receivedAt: { gte: new Date(Date.now() - 72 * 3600_000) } },
+    });
+
+    // "Rejected" is the key being refused. Everything still failing with zero
+    // successes in a day is the same outage from the customer's side even if
+    // the cause is something else, so both raise the banner.
+    const keyRejected = Boolean(action);
+    const allFailing = failed > 0 && succeeded === 0;
+
+    return {
+      ok: !keyRejected && !allFailing,
+      keyRejected,
+      failed24h: failed,
+      succeeded24h: succeeded,
+      strandedMessages: stranded,
+      lastError: lastFailure?.error?.slice(0, 200) ?? null,
+      lastErrorAt: lastFailure?.createdAt ?? null,
+      since: action?.createdAt ?? null,
+    };
+  });
+
+  /**
+   * Replay messages that were never answered because the AI was down.
+   * Admin-only and never automatic — only the operator knows the cause is gone.
+   */
+  app.post<{ Body: { withinHours?: number } }>('/api/dead-letters/replay', async (req) => {
+    requireAdmin(req);
+    const tenantId = tenantOf(req);
+    const { replayDeadLetters } = await import('../modules/webhooks/service.js');
+    const result = await replayDeadLetters({
+      tenantId,
+      withinHours: Number(req.body?.withinHours) || 72,
+    });
+    return result;
+  });
 
   // ── Manual actions ────────────────────────────────────────────────────────
   app.get('/api/manual-actions', async (req) => {

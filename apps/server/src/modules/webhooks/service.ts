@@ -1,6 +1,7 @@
 import { Prisma, type Channel, type WebhookEvent } from '@prisma/client';
 import { getPrisma } from '../../db/client.js';
 import { getQueue } from '../../queue/index.js';
+import { childLogger } from '../../lib/logger.js';
 
 /**
  * Durable inbound events (spec §23, §54): every webhook is persisted BEFORE any
@@ -79,6 +80,64 @@ export async function recoverStuckEvents(): Promise<number> {
     await getQueue().enqueue('webhook:process', { webhookEventId: e.id });
   }
   return stuck.length;
+}
+
+/**
+ * Put dead-lettered events back on the queue.
+ *
+ * A dead letter is a message from a real customer that was never answered.
+ * When the cause was an expired API key, every one of them failed for a reason
+ * that is now fixed — and they stay dead forever unless something replays
+ * them. This is that something.
+ *
+ * Operator-triggered, never automatic: replaying is only right once the cause
+ * is actually gone, and the operator is the one who knows that. Bounded by age
+ * so a fix today cannot resurrect a conversation from last month, and by count
+ * so one click cannot flood the queue.
+ *
+ * Safe to run twice: the worker claims each event atomically, so a second
+ * replay of an event already being retried is a no-op rather than a duplicate
+ * reply.
+ */
+export async function replayDeadLetters(params: {
+  tenantId: string;
+  /** Only events received within this many hours. */
+  withinHours?: number;
+  limit?: number;
+}): Promise<{ replayed: number; skippedTooOld: number }> {
+  const prisma = getPrisma();
+  const withinHours = Math.min(params.withinHours ?? 72, 24 * 14);
+  const limit = Math.min(params.limit ?? 200, 500);
+  const cutoff = new Date(Date.now() - withinHours * 3600_000);
+
+  const [eligible, tooOld] = await Promise.all([
+    prisma.webhookEvent.findMany({
+      where: { tenantId: params.tenantId, status: 'DEAD_LETTER', receivedAt: { gte: cutoff } },
+      select: { id: true },
+      orderBy: { receivedAt: 'asc' },
+      take: limit,
+    }),
+    prisma.webhookEvent.count({
+      where: { tenantId: params.tenantId, status: 'DEAD_LETTER', receivedAt: { lt: cutoff } },
+    }),
+  ]);
+
+  if (eligible.length === 0) return { replayed: 0, skippedTooOld: tooOld };
+
+  // Reset the attempt counter with the status: a replay that inherits the
+  // exhausted count would dead-letter again on its first hiccup.
+  await prisma.webhookEvent.updateMany({
+    where: { id: { in: eligible.map((e) => e.id) } },
+    data: { status: 'ENQUEUED', attempts: 0, error: null },
+  });
+  for (const e of eligible) {
+    await getQueue().enqueue('webhook:process', { webhookEventId: e.id });
+  }
+  childLogger({ module: 'webhooks', tenantId: params.tenantId }).info(
+    { replayed: eligible.length, withinHours },
+    'dead-lettered events replayed',
+  );
+  return { replayed: eligible.length, skippedTooOld: tooOld };
 }
 
 /**

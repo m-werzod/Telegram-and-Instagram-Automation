@@ -579,6 +579,21 @@ a.btn.small { text-decoration: none; }
 .user-row-actions input { flex: 1; min-width: 0; }
 .danger-label { display: none; }
 
+/* ── Automation-down banner ─────────────────────────────────────────────── */
+.down-banner {
+  display: flex; gap: 12px; align-items: flex-start; margin-bottom: 18px;
+  background: var(--bad-soft); border: 1px solid #f2cccc; border-left: 4px solid var(--bad);
+  border-radius: var(--radius); padding: 14px 16px;
+}
+.down-banner > svg { color: var(--bad); margin-top: 1px; flex-shrink: 0; }
+.down-body { flex: 1; min-width: 0; font-size: 13.5px; line-height: 1.6; }
+.down-body > strong { display: block; font-size: 14.5px; margin-bottom: 3px; color: #7f1d1d; }
+.down-detail { color: #6b2222; }
+.down-error {
+  margin-top: 8px; background: rgba(255,255,255,0.6); border-radius: 8px; padding: 7px 9px;
+  font-size: 11.5px; color: #7f1d1d; overflow-wrap: anywhere;
+}
+
 /* ── Owner AI instructions ──────────────────────────────────────────────── */
 .instruction-row {
   display: flex; gap: 11px; align-items: flex-start;
@@ -734,6 +749,9 @@ a.btn.small { text-decoration: none; }
   .lead-collected { grid-template-columns: 1fr; gap: 8px; }
 
   /* Two selects side by side leave neither readable at 375px. */
+  .down-banner { padding: 12px 13px; gap: 10px; }
+  .down-body { font-size: 13px; }
+
   .instruction-row { flex-wrap: wrap; }
   .instruction-body { flex: 1 0 100%; order: 1; }
   .instruction-row > .toggle { margin-top: 0; }

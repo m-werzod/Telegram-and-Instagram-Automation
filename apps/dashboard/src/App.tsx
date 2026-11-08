@@ -9,6 +9,7 @@ import BrandLogo from './components/BrandLogo';
 import SplashScreen from './components/SplashScreen';
 import ErrorBoundary from './components/ErrorBoundary';
 import InstallAppButton from './components/InstallAppButton';
+import AutomationDownBanner from './components/AutomationDownBanner';
 import Login from './pages/Login';
 import Overview from './pages/Overview';
 import Agents from './pages/Agents';
@@ -229,6 +230,10 @@ function Shell({
       </nav>
 
       <main className="main">
+        {/* Above every page: an outage the owner cannot see is an outage that
+            gets diagnosed as "Instagram is broken" four days later. */}
+        <AutomationDownBanner isAdmin={isAdmin} />
+
         {/* Keyed by path so a crashing page is isolated to that page and
             navigating away clears it — the shell and nav stay usable. */}
         <ErrorBoundary key={location.pathname}>
