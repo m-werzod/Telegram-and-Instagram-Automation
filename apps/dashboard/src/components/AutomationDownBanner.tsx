@@ -16,6 +16,13 @@ import { api, ApiError } from '../api';
  * number that matters: how many real customers went unanswered.
  */
 
+interface ChannelProblem {
+  channel: 'INSTAGRAM' | 'TELEGRAM';
+  displayName: string;
+  healthStatus: string;
+  detail: string;
+}
+
 interface AiStatus {
   ok: boolean;
   keyRejected: boolean;
@@ -24,6 +31,7 @@ interface AiStatus {
   strandedMessages: number;
   lastError: string | null;
   since: string | null;
+  channels?: ChannelProblem[];
 }
 
 export default function AutomationDownBanner({ isAdmin }: { isAdmin: boolean }) {
@@ -46,18 +54,34 @@ export default function AutomationDownBanner({ isAdmin }: { isAdmin: boolean }) 
   if (!s || s.ok) return null;
 
   const since = s.since ? new Date(s.since).toLocaleString('uz-UZ') : null;
+  const channels = s.channels ?? [];
+  // A dead channel token is the more urgent of the two: the AI can be perfect
+  // and still reach nobody, so the channel outage is what the banner leads with.
+  const channelsDown = channels.length > 0;
 
   return (
     <div className="down-banner" role="alert">
       <AlertTriangle size={20} />
       <div className="down-body">
         <strong>
-          {s.keyRejected
-            ? 'AI kaliti ishlamayapti — hech kimga javob berilmayapti'
-            : 'AI javob bera olmayapti'}
+          {channelsDown
+            ? `${channels.map((c) => (c.channel === 'INSTAGRAM' ? 'Instagram' : 'Telegram')).join(' va ')} ulanishi uzilgan — javob yuborib bo‘lmaydi`
+            : s.keyRejected
+              ? 'AI kaliti ishlamayapti — hech kimga javob berilmayapti'
+              : 'AI javob bera olmayapti'}
         </strong>
         <div className="down-detail">
-          {s.keyRejected ? (
+          {channelsDown ? (
+            <>
+              {channels.map((c) => (
+                <div key={c.channel} style={{ marginBottom: 4 }}>
+                  <strong>{c.displayName}</strong> — {c.detail || c.healthStatus}
+                </div>
+              ))}
+              Tokenni yangilang: <strong>Ulanishlar</strong> sahifasida akkauntni qayta ulang.
+              Gaplashuvlar kelayotgan bo‘lsa ham, javob yuborilmaydi.
+            </>
+          ) : s.keyRejected ? (
             <>
               AI provayderi saqlangan kalitni rad etmoqda, shuning uchun{' '}
               <strong>Instagram ham, Telegram ham</strong> javob bermaydi. Bu Instagram nosozligi
@@ -81,16 +105,17 @@ export default function AutomationDownBanner({ isAdmin }: { isAdmin: boolean }) 
 
         {isAdmin && (
           <div className="row" style={{ gap: 8, marginTop: 10 }}>
-            <Link to="/settings" className="btn small">
-              <KeyRound size={13} /> Kalitni almashtirish
+            <Link to={channelsDown ? '/connections' : '/settings'} className="btn small">
+              <KeyRound size={13} />
+              {channelsDown ? 'Ulanishlar sahifasi' : 'Kalitni almashtirish'}
             </Link>
             {s.strandedMessages > 0 && (
               <button
                 className="small"
-                disabled={replay.isPending || s.keyRejected}
+                disabled={replay.isPending || s.keyRejected || channelsDown}
                 title={
-                  s.keyRejected
-                    ? 'Avval ishlaydigan kalit kiriting — hozir qayta yuborish yana xato beradi'
+                  s.keyRejected || channelsDown
+                    ? 'Avval ulanish va kalitni tiklang — hozir qayta yuborish yana xato beradi'
                     : 'Javobsiz qolgan xabarlarni qayta ishlash'
                 }
                 onClick={() => replay.mutate()}

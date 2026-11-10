@@ -335,6 +335,60 @@ export async function refreshInstagramTokenIfDue(connection: ChannelConnection):
   );
 }
 
+/**
+ * Are Instagram DMs actually being delivered to this server?
+ *
+ * There is a failure mode here that produces no error anywhere and is
+ * invisible in every other check: comments arrive perfectly while message
+ * webhooks are never sent at all. The connection verifies, the token is valid,
+ * the agent is enabled, replies to comments go out — and every DM a customer
+ * sends is simply never seen. On this deployment that state lasted from the
+ * first day: 104 comment events and zero message events.
+ *
+ * Meta stops delivering messages when the account's "Connected tools → Allow
+ * Access to Messages" toggle is off, or when the app is not subscribed to the
+ * `messages` field — neither of which the API reports as a problem.
+ *
+ * The asymmetry itself is the evidence, so it is measured rather than
+ * inferred: a healthy number of comments with no messages at all means
+ * delivery is off, not that nobody has written.
+ */
+async function describeDmDelivery(tenantId: string): Promise<string> {
+  const prisma = getPrisma();
+  const [comments, messages] = await Promise.all([
+    prisma.webhookEvent.count({
+      where: { tenantId, channel: 'INSTAGRAM', eventKey: { startsWith: 'comment:' } },
+    }),
+    prisma.webhookEvent.count({
+      where: { tenantId, channel: 'INSTAGRAM', eventKey: { startsWith: 'message:' } },
+    }),
+  ]);
+
+  if (messages > 0) return `; DMs: ${messages} received`;
+  // Too few comments to conclude anything — the account may just be quiet.
+  if (comments < 10) return '';
+
+  await upsertManualAction(tenantId, {
+    dedupKey: 'ig-dm-never-delivered',
+    platform: 'Instagram',
+    title: 'Instagram is delivering comments but NOT direct messages',
+    officialUrl:
+      'https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/messaging-api',
+    steps: [
+      `This platform has received ${comments} comment events from Instagram and ZERO message events. Comments work, so the webhook address, the app secret and the token are all correct — Meta is simply not sending direct messages.`,
+      'Cause 1 (most common): on the phone, open the Instagram app signed in as this account → Settings and privacy → Messages and story replies → Message controls → Connected tools → turn "Allow Access to Messages" ON. With that toggle off, Meta silently never delivers a single message webhook and reports no error anywhere.',
+      'Cause 2: the app is not subscribed to the "messages" field. Open https://developers.facebook.com/apps → your app → Instagram → "API setup with Instagram business login" → section 3 "Configure webhooks" → make sure BOTH "comments" and "messages" are ticked, then save.',
+      'Cause 3: the account is not reachable for messaging — it must be a Professional (Business or Creator) account, and the app needs Advanced Access for instagram_business_manage_messages to message people who hold no role on the app.',
+      'After changing either setting, send a DM to the account from a DIFFERENT Instagram account and re-run this health check.',
+    ],
+    expectedResult:
+      'A DM sent to the account appears in the dashboard and is answered, and this health check reports "DMs: N received".',
+    whatToReturn: 'Nothing — this task resolves itself as soon as one message webhook arrives.',
+  }).catch(() => undefined);
+
+  return `; DMs: NONE EVER RECEIVED despite ${comments} comments — "Allow Access to Messages" is probably off (see Manual Actions)`;
+}
+
 /** Live health check (spec §27). */
 export async function checkInstagramHealth(connection: ChannelConnection): Promise<{
   status: 'CONNECTED' | 'DEGRADED' | 'AUTH_REQUIRED' | 'PERMISSION_REQUIRED' | 'DISCONNECTED';
@@ -355,9 +409,13 @@ export async function checkInstagramHealth(connection: ChannelConnection): Promi
         detail: `Token valid but refresh failed: ${errorMessage(err)}`,
       };
     }
+    const dm = await describeDmDelivery(connection.tenantId).catch(() => '');
+    if (dm.includes('received')) {
+      await resolveManualAction(connection.tenantId, 'ig-dm-never-delivered').catch(() => undefined);
+    }
     return {
       status: 'CONNECTED',
-      detail: `Token valid for @${me.username ?? connection.externalAccountId}`,
+      detail: `Token valid for @${me.username ?? connection.externalAccountId}${dm}`,
     };
   } catch (err) {
     const msg = errorMessage(err);

@@ -163,7 +163,20 @@ export async function opsRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/ai-status', async (req) => {
     const tenantId = tenantOf(req);
     const prisma = getPrisma();
-    const since = new Date(Date.now() - 24 * 3600_000);
+
+    // Failures from BEFORE the key was replaced say nothing about now. Judging
+    // on a flat 24-hour window made the banner keep crying outage minutes
+    // after a good key was pasted — no call had been made yet, so there were
+    // old failures and no successes, which reads identically to "still
+    // broken". A key change resets the evidence.
+    const keyChange = await prisma.appSetting.findFirst({
+      where: { tenantId, key: { in: ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY'] } },
+      orderBy: { updatedAt: 'desc' },
+      select: { updatedAt: true },
+    });
+    const dayAgo = new Date(Date.now() - 24 * 3600_000);
+    const since =
+      keyChange && keyChange.updatedAt > dayAgo ? keyChange.updatedAt : dayAgo;
 
     const [action, failed, succeeded, lastFailure] = await Promise.all([
       prisma.manualAction.findFirst({
@@ -173,7 +186,7 @@ export async function opsRoutes(app: FastifyInstance): Promise<void> {
       prisma.aIExecution.count({ where: { tenantId, status: 'FAILED', createdAt: { gte: since } } }),
       prisma.aIExecution.count({ where: { tenantId, status: 'SUCCEEDED', createdAt: { gte: since } } }),
       prisma.aIExecution.findFirst({
-        where: { tenantId, status: 'FAILED' },
+        where: { tenantId, status: 'FAILED', createdAt: { gte: since } },
         orderBy: { createdAt: 'desc' },
         select: { error: true, createdAt: true },
       }),
@@ -184,6 +197,14 @@ export async function opsRoutes(app: FastifyInstance): Promise<void> {
       where: { tenantId, status: 'DEAD_LETTER', receivedAt: { gte: new Date(Date.now() - 72 * 3600_000) } },
     });
 
+    // A dead channel token is the same outage from a customer's side as a dead
+    // AI key: nobody gets a reply. The connection row says "connected" while
+    // healthStatus says AUTH_REQUIRED, so the list view alone does not show it.
+    const channels = await prisma.channelConnection.findMany({
+      where: { tenantId, status: 'connected', healthStatus: { notIn: ['CONNECTED', 'UNKNOWN'] } },
+      select: { channel: true, displayName: true, healthStatus: true, healthDetail: true },
+    });
+
     // "Rejected" is the key being refused. Everything still failing with zero
     // successes in a day is the same outage from the customer's side even if
     // the cause is something else, so both raise the banner.
@@ -191,14 +212,23 @@ export async function opsRoutes(app: FastifyInstance): Promise<void> {
     const allFailing = failed > 0 && succeeded === 0;
 
     return {
-      ok: !keyRejected && !allFailing,
+      ok: !keyRejected && !allFailing && channels.length === 0,
       keyRejected,
+      channels: channels.map((c) => ({
+        channel: c.channel,
+        displayName: c.displayName,
+        healthStatus: c.healthStatus,
+        detail: c.healthDetail,
+      })),
       failed24h: failed,
       succeeded24h: succeeded,
       strandedMessages: stranded,
       lastError: lastFailure?.error?.slice(0, 200) ?? null,
       lastErrorAt: lastFailure?.createdAt ?? null,
       since: action?.createdAt ?? null,
+      /** Evidence window — the dashboard says "not tested yet" rather than "ok". */
+      measuredSince: since,
+      keyChangedAt: keyChange?.updatedAt ?? null,
     };
   });
 

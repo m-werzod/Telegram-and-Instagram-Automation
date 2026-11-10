@@ -62,10 +62,57 @@ describe('AI status and dead-letter replay', () => {
     prisma.manualAction.findFirst.mockResolvedValue(null);
     prisma.aIExecution.count.mockResolvedValue(0);
     prisma.webhookEvent.count.mockResolvedValue(0);
+    prisma.channelConnection.findMany.mockResolvedValue([]);
 
     const { body } = await status();
     expect(body.ok).toBe(true);
     expect(body.keyRejected).toBe(false);
+  });
+
+  // The failure that prompted this: a good key pasted minutes ago, no message
+  // received since, and a day's worth of PRE-FIX failures still on record.
+  // Judging on a flat 24h window called that an outage and told the owner it
+  // was still broken when it was not.
+  it('does not call it an outage when every failure predates the new key', async () => {
+    signInAs('ADMIN');
+    prisma.manualAction.findFirst.mockResolvedValue(null);
+    prisma.appSetting.findFirst.mockResolvedValue({ updatedAt: new Date(Date.now() - 5 * 60_000) });
+    // Nothing has been attempted since the key changed.
+    prisma.aIExecution.count.mockResolvedValue(0);
+    prisma.webhookEvent.count.mockResolvedValue(0);
+    prisma.channelConnection.findMany.mockResolvedValue([]);
+
+    const { body } = await status();
+    expect(body.ok).toBe(true);
+    // The evidence window must start at the key change, not 24h ago.
+    const where = (prisma.aIExecution.count.mock.calls[0]![0] as {
+      where: { createdAt: { gte: Date } };
+    }).where;
+    expect(Date.now() - where.createdAt.gte.getTime()).toBeLessThan(10 * 60_000);
+  });
+
+  // A perfect AI reaches nobody through a dead channel token.
+  it('reports a channel whose token has been invalidated', async () => {
+    signInAs('ADMIN');
+    prisma.manualAction.findFirst.mockResolvedValue(null);
+    prisma.aIExecution.count.mockResolvedValue(0);
+    prisma.webhookEvent.count.mockResolvedValue(0);
+    prisma.channelConnection.findMany.mockResolvedValue([
+      {
+        channel: 'INSTAGRAM',
+        displayName: '@avtomaktab_turon',
+        healthStatus: 'AUTH_REQUIRED',
+        healthDetail: 'Access token expired or revoked — reconnect the account',
+      },
+    ]);
+
+    const { body } = await status();
+    expect(body.ok).toBe(false);
+    expect(body.channels).toHaveLength(1);
+    expect(body.channels[0]).toMatchObject({
+      channel: 'INSTAGRAM',
+      healthStatus: 'AUTH_REQUIRED',
+    });
   });
 
   // The exact shape of the outage that went unnoticed.
@@ -81,6 +128,7 @@ describe('AI status and dead-letter replay', () => {
       createdAt: new Date(),
     });
     prisma.webhookEvent.count.mockResolvedValue(82);
+    prisma.channelConnection.findMany.mockResolvedValue([]);
 
     const { body } = await status();
     expect(body.ok).toBe(false);
@@ -100,6 +148,7 @@ describe('AI status and dead-letter replay', () => {
       return where.status === 'FAILED' ? 40 : 0;
     });
     prisma.webhookEvent.count.mockResolvedValue(0);
+    prisma.channelConnection.findMany.mockResolvedValue([]);
 
     const { body } = await status();
     expect(body.ok).toBe(false);
@@ -114,6 +163,7 @@ describe('AI status and dead-letter replay', () => {
       return where.status === 'FAILED' ? 3 : 100;
     });
     prisma.webhookEvent.count.mockResolvedValue(0);
+    prisma.channelConnection.findMany.mockResolvedValue([]);
 
     expect((await status()).body.ok).toBe(true);
   });
@@ -125,6 +175,7 @@ describe('AI status and dead-letter replay', () => {
     prisma.manualAction.findFirst.mockResolvedValue(null);
     prisma.aIExecution.count.mockResolvedValue(0);
     prisma.webhookEvent.count.mockResolvedValue(0);
+    prisma.channelConnection.findMany.mockResolvedValue([]);
 
     expect((await status()).code).toBe(200);
   });
