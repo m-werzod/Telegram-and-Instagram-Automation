@@ -32,6 +32,13 @@ A production-grade, multi-agent AI automation platform with a unified CRM:
 All integration behavior is built on **verified current official APIs** — see
 [docs/integration-notes.md](docs/integration-notes.md) for the researched facts and sources.
 
+> **Instagram not answering anybody?** Instagram has no polling mode: every comment
+> and DM arrives only because Meta POSTs it here, so the channel can be completely
+> dead while the token is valid and everything looks green. The dashboard answers
+> this directly — **Connections → "Instagram nega javob bermayapti?"** runs every
+> precondition live and names the fix. Background and the full ordered checklist:
+> **[docs/instagram-not-answering.md](docs/instagram-not-answering.md)**.
+
 ## Architecture
 
 Modular monolith (TypeScript, ESM):

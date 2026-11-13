@@ -48,6 +48,18 @@ https://developers.facebook.com/docs/graph-api/webhooks/getting-started
 - Per-account enablement (automated by this platform):
   `POST https://graph.instagram.com/v25.0/me/subscribed_apps?subscribed_fields=comments,messages,...`
   with the Instagram User token. Without it, no events arrive for that account.
+  - A single unavailable field (e.g. `live_comments` without Advanced Access) rejects
+    the WHOLE call, leaving the account subscribed to nothing — so the platform asks
+    for `comments,live_comments,messages` and falls back to `comments,messages`.
+  - `GET /me/subscribed_apps` reads the live subscription back (`data[].subscribed_fields`).
+    This is the ONLY call that distinguishes "connected" from "actually receiving
+    events", so it is re-verified at every boot and every health check, and an
+    unreadable edge is never treated as proof of a healthy one.
+- `entry[].id` is the professional account id, but Meta publishes TWO ids for the same
+  account (`user_id` and the app-scoped `id` from `GET /me`) and which one appears in
+  `entry.id` has differed between apps and API versions. Matching only one drops every
+  event with no error at either end, so both are stored and matched, and the id Meta
+  actually uses is learned from the first delivery.
 - Delivery: respond 200 within ~5 s (messaging) — we ACK immediately and process async.
   Retries: immediate then decreasing frequency up to 36 h ⇒ duplicates possible ⇒
   server-side dedup required. Batched: up to 1000 updates per POST ⇒ iterate `entry[]`.

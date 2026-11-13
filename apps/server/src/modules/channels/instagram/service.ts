@@ -5,6 +5,7 @@ import { decryptSecret, encryptSecret } from '../../../lib/crypto.js';
 import { ValidationError, errorMessage } from '../../../lib/errors.js';
 import { childLogger } from '../../../lib/logger.js';
 import { isPubliclyReachable } from '../shared/reachability.js';
+import { resolveGlobalSetting } from '../../settings/service.js';
 import { upsertManualAction, resolveManualAction } from '../../manual-actions/service.js';
 import { InstagramClient } from './client.js';
 
@@ -21,7 +22,233 @@ interface InstagramCredentials {
   obtainedAt: number;
 }
 
-const SUBSCRIBED_FIELDS = ['comments', 'messages'];
+/**
+ * Webhook fields this platform needs on every connected account.
+ *
+ * `comments` and `messages` are not optional extras: Instagram has no pull
+ * mode, so an account that is not subscribed to them delivers NOTHING, for
+ * ever, while every other check still passes. They are therefore treated as
+ * part of being connected, not as a nice-to-have (see
+ * `ensureInstagramSubscription`).
+ */
+const REQUIRED_FIELDS = ['comments', 'messages'] as const;
+
+/**
+ * What is asked for first. `live_comments` is wanted — comments during a live
+ * broadcast arrive on their own field and the handler already routes them —
+ * but it is NOT required, because `POST /me/subscribed_apps` rejects the whole
+ * call if any single field is unavailable to the app. Asking for the wider set
+ * and falling back to the required one means an app that cannot have
+ * live_comments still ends up correctly subscribed instead of unsubscribed.
+ */
+const PREFERRED_FIELDS = ['comments', 'live_comments', 'messages'] as const;
+
+/**
+ * What Meta says this account's webhook subscription actually is, right now.
+ *
+ * `ok` means every REQUIRED_FIELD is live, which is the only state in which a
+ * comment or a DM can reach this server at all.
+ */
+export interface SubscriptionState {
+  ok: boolean;
+  /** Fields Meta reports as subscribed (empty when the edge could not be read). */
+  fields: string[];
+  missing: string[];
+  /** Whether GET /me/subscribed_apps could be read at all. */
+  readable: boolean;
+  /** Set when this call had to (re-)subscribe the account. */
+  repaired: boolean;
+  error: string | null;
+}
+
+function uniqueFields(subs: Array<{ subscribed_fields?: string[] }>): string[] {
+  return [...new Set(subs.flatMap((sub) => sub.subscribed_fields ?? []))];
+}
+
+/**
+ * Subscribe, preferring the wider field set and falling back to the required
+ * one. A single unavailable field (typically `live_comments`, which needs
+ * Advanced Access) rejects the entire POST, so one request is not enough.
+ */
+async function subscribeWithFallback(
+  client: InstagramClient,
+): Promise<{ ok: boolean; fields: string[]; error: string | null }> {
+  const attempts: Array<readonly string[]> = [PREFERRED_FIELDS, REQUIRED_FIELDS];
+  let lastError: string | null = null;
+  for (const fields of attempts) {
+    try {
+      await client.subscribeApps([...fields]);
+      return { ok: true, fields: [...fields], error: lastError };
+    } catch (err) {
+      lastError = errorMessage(err);
+    }
+  }
+  return { ok: false, fields: [], error: lastError };
+}
+
+/**
+ * Make sure Meta is actually subscribed to deliver this account's comments and
+ * DMs here — and say so honestly when it is not.
+ *
+ * This is the fix for the failure that makes Instagram automation look
+ * completely dead while the dashboard stays green. `POST /me/subscribed_apps`
+ * runs once, at connect time, and its failure was only ever a log line plus a
+ * `PERMISSION_REQUIRED` health status — which the next health check (token
+ * valid ⇒ `CONNECTED`) overwrote 15 minutes later. From then on nothing
+ * anywhere knew the account was unsubscribed, nothing retried it, and not one
+ * comment or message could ever arrive. Telegram has nothing equivalent: it
+ * re-arms its webhook/polling at boot and `getWebhookInfo` reports delivery
+ * problems on every check, which is exactly why one channel kept working and
+ * the other went silent.
+ *
+ * So the subscription is now READ BACK from Meta, repaired when it is missing,
+ * and re-verified on every health check and every boot.
+ *
+ * An unreadable edge is deliberately NOT treated as proof of a good one: if
+ * the read fails, a subscribe is attempted anyway, because being wrong in that
+ * direction costs one idempotent API call, and being wrong in the other
+ * direction costs every customer message.
+ */
+export async function ensureInstagramSubscription(
+  connection: ChannelConnection,
+  opts: {
+    repair?: boolean;
+    /**
+     * Client to use instead of one built from the stored credentials. The
+     * connect flow passes the client for the token being connected: reading
+     * the token back out of the row that was just written would make the
+     * subscribe depend on the write having landed and been returned, and the
+     * subscribe has to be made with the new account's token, never the one it
+     * replaced.
+     */
+    client?: InstagramClient;
+  } = {},
+): Promise<SubscriptionState> {
+  const log = childLogger({ module: 'instagram', tenantId: connection.tenantId });
+  if (connection.status !== 'connected' || !connection.credentialsEncrypted) {
+    return {
+      ok: false,
+      fields: [],
+      missing: [...REQUIRED_FIELDS],
+      readable: false,
+      repaired: false,
+      error: 'not connected',
+    };
+  }
+
+  const client = opts.client ?? getInstagramClient(connection);
+  let fields: string[] = [];
+  let readable = false;
+  let error: string | null = null;
+
+  try {
+    fields = uniqueFields(await client.getSubscribedApps());
+    readable = true;
+  } catch (err) {
+    error = errorMessage(err);
+  }
+
+  let missing = REQUIRED_FIELDS.filter((field) => !fields.includes(field));
+  let repaired = false;
+
+  if (opts.repair !== false && (missing.length > 0 || !readable)) {
+    const attempt = await subscribeWithFallback(client);
+    if (attempt.ok) {
+      repaired = true;
+      error = null;
+      // Re-read so the verdict is Meta's answer, not our optimism.
+      try {
+        fields = uniqueFields(await client.getSubscribedApps());
+        readable = true;
+      } catch {
+        // The edge is write-only for this app. A successful POST is then the
+        // best evidence available, so take it.
+        fields = attempt.fields;
+      }
+      missing = REQUIRED_FIELDS.filter((field) => !fields.includes(field));
+      log.info({ fields }, 'instagram webhook subscription repaired');
+    } else {
+      error = attempt.error;
+      log.warn({ err: error, fields }, 'instagram webhook subscription could NOT be established');
+    }
+  }
+
+  const ok = missing.length === 0 && (readable || repaired);
+  if (!ok) {
+    await upsertManualAction(connection.tenantId, {
+      dedupKey: 'ig-subscription-missing',
+      platform: 'Instagram',
+      title: 'Instagram is not subscribed to deliver comments or DMs to this server',
+      officialUrl: 'https://developers.facebook.com/docs/instagram-platform/webhooks',
+      steps: [
+        `BLOCKER — Meta is not delivering this account's events here. Instagram has no polling mode, so until this is fixed not one comment and not one direct message can ever arrive, however correct the token, the app secret and the agents are.`,
+        readable
+          ? `Meta reports these subscribed fields for ${connection.displayName}: ${fields.length ? fields.join(', ') : '(none)'} — missing: ${missing.join(', ')}.`
+          : `The subscription could not even be read back from Meta (${error ?? 'unknown error'}), and re-subscribing failed.`,
+        'Cause 1 — the access token lacks the permissions. Re-generate it in https://developers.facebook.com/apps/ → your app → Instagram → "API setup with Instagram business login" → Generate token, approving ALL of: instagram_business_basic, instagram_business_manage_comments, instagram_business_manage_messages. Then paste it again on the Connections page.',
+        'Cause 2 — the app is still in Development mode. Switch it to Live at the top of the App Dashboard; Meta does not deliver webhooks for a Development-mode app.',
+        'Cause 3 — the app-level webhook is not configured. App Dashboard → Instagram → section "3. Configure webhooks": set the callback URL and verify token, press "Verify and save", then tick the "comments" and "messages" fields.',
+        'Cause 4 — comment webhooks additionally need Advanced Access for instagram_business_manage_comments (App Review). See the App Review task.',
+        'After any of these, press "Health check" on the Connections page — the platform re-subscribes automatically and this task closes itself once Meta confirms the subscription.',
+      ],
+      expectedResult:
+        'The Connections page shows Instagram as connected with "webhook subscription: comments, messages", and a test comment or DM is answered.',
+      whatToReturn: 'Nothing — this task resolves itself as soon as the subscription is confirmed.',
+    }).catch(() => undefined);
+  } else {
+    await resolveManualAction(connection.tenantId, 'ig-subscription-missing').catch(() => undefined);
+  }
+
+  return { ok, fields, missing, readable, repaired, error };
+}
+
+/**
+ * Re-verify (and silently repair) every connected Instagram account's webhook
+ * subscription at boot.
+ *
+ * The Telegram channel has always re-armed its transport on startup; Instagram
+ * did not re-arm anything, so a subscription that was never established — or
+ * that Meta dropped when the token was re-generated — stayed broken until
+ * somebody happened to reconnect the account by hand.
+ */
+export async function ensureInstagramDelivery(): Promise<void> {
+  const prisma = getPrisma();
+  const connections = await prisma.channelConnection.findMany({
+    where: { channel: 'INSTAGRAM', status: 'connected' },
+  });
+  for (const connection of connections) {
+    const state = await ensureInstagramSubscription(connection).catch((err) => {
+      childLogger({ module: 'instagram', tenantId: connection.tenantId }).warn(
+        { err: errorMessage(err) },
+        'instagram subscription check failed at boot',
+      );
+      return null;
+    });
+    if (!state) continue;
+    if (state.ok) continue;
+    // Record the fault so the dashboard and the "automation is down" banner
+    // can see it immediately, instead of only at the next health check.
+    await prisma.channelConnection
+      .update({
+        where: { id: connection.id },
+        data: {
+          healthStatus: 'PERMISSION_REQUIRED',
+          healthDetail: subscriptionDetail(state),
+          lastHealthCheckAt: new Date(),
+        },
+      })
+      .catch(() => undefined);
+  }
+}
+
+function subscriptionDetail(state: SubscriptionState): string {
+  if (state.ok) {
+    return `webhook subscription: ${state.fields.length ? state.fields.join(', ') : 'confirmed'}`;
+  }
+  return state.readable
+    ? `NOT RECEIVING EVENTS — Meta is not subscribed to ${state.missing.join(' + ')} for this account (subscribed: ${state.fields.join(', ') || 'nothing'}). No comment or DM can arrive until this is fixed; see Manual Actions.`
+    : `NOT RECEIVING EVENTS — the webhook subscription could not be established (${state.error ?? 'unknown error'}). No comment or DM can arrive until this is fixed; see Manual Actions.`;
+}
 
 export function getInstagramClient(connection: ChannelConnection): InstagramClient {
   const env = getEnv();
@@ -68,9 +295,18 @@ export async function connectInstagram(
     JSON.stringify({ accessToken: token, obtainedAt: Date.now() } satisfies InstagramCredentials),
     env.ENCRYPTION_KEY,
   );
+  // Both identifiers Meta hands out for the same professional account are
+  // kept, because `entry.id` on an incoming webhook is matched against them.
+  // `/me` returns `user_id` (the professional account id, which is what
+  // webhooks carry) and `id` (the app-scoped id); which one a given app/API
+  // version puts in `entry.id` has moved historically, and a mismatch drops
+  // every event on the floor with no error anywhere. Matching either costs
+  // nothing and removes the whole failure mode.
+  const accountIds = [...new Set([me.user_id, me.id].filter(Boolean).map(String))];
   const metadata = {
     username: me.username ?? null,
     accountType: me.account_type ?? null,
+    accountIds,
     // What happened to the account that was automated until now, so the
     // dashboard can state it instead of implying a clean handover.
     ...(switchedAccount
@@ -105,23 +341,21 @@ export async function connectInstagram(
     },
   });
 
-  // 4. Automate per-account webhook subscription (the part the API allows).
-  let subscribed = false;
-  try {
-    await client.subscribeApps(SUBSCRIBED_FIELDS);
-    subscribed = true;
-    log.info({ fields: SUBSCRIBED_FIELDS }, 'subscribed_apps configured');
-  } catch (err) {
-    log.warn({ err: errorMessage(err) }, 'subscribed_apps failed — check permissions');
-  }
+  // 4. Per-account webhook subscription — established AND read back, because
+  //    an account that is not subscribed receives nothing and reports nothing.
+  const subscription = await ensureInstagramSubscription(connection, { client });
+  log.info(
+    { fields: subscription.fields, ok: subscription.ok },
+    subscription.ok ? 'subscribed_apps confirmed' : 'subscribed_apps NOT established',
+  );
 
   await prisma.channelConnection.update({
     where: { id: connection.id },
     data: {
-      healthStatus: subscribed ? 'CONNECTED' : 'PERMISSION_REQUIRED',
-      healthDetail: subscribed
-        ? 'Token valid; account webhook subscription active. App-level webhook config must be completed in the Meta App Dashboard (see Manual Actions).'
-        : 'Token valid but POST /me/subscribed_apps failed — the token likely lacks instagram_business_manage_comments / instagram_business_manage_messages.',
+      healthStatus: subscription.ok ? 'CONNECTED' : 'PERMISSION_REQUIRED',
+      healthDetail: subscription.ok
+        ? `Token valid; ${subscriptionDetail(subscription)}. App-level webhook config must be completed in the Meta App Dashboard (see Manual Actions).`
+        : subscriptionDetail(subscription),
       lastHealthCheckAt: new Date(),
     },
   });
@@ -302,6 +536,86 @@ export async function disconnectInstagram(tenantId: string): Promise<void> {
   });
 }
 
+/**
+ * Which connection an incoming webhook belongs to, given `entry.id`.
+ *
+ * Meta publishes two ids for the same professional account — `user_id` and the
+ * app-scoped `id` from `GET /me` — and which of them lands in `entry.id` has
+ * differed between apps and API versions. A single-column equality match on
+ * the wrong one drops EVERY event with no error at either end, which is
+ * indistinguishable from Meta not sending anything at all. So:
+ *
+ *  1. exact match on the stored account id (the normal path);
+ *  2. match against the other id recorded for the account at connect time;
+ *  3. if the whole deployment has exactly ONE connected Instagram account,
+ *     accept it and learn the id Meta is really using.
+ *
+ * Step 3 is safe precisely because it is gated on there being one and only one
+ * candidate: with two accounts connected it does nothing, so an event can
+ * never be attributed to the wrong tenant.
+ */
+export async function resolveInstagramConnection(
+  accountId: string,
+  log?: { info: (obj: unknown, msg: string) => void; warn: (obj: unknown, msg: string) => void },
+): Promise<{ id: string; tenantId: string } | null> {
+  const prisma = getPrisma();
+
+  const exact = await prisma.channelConnection.findFirst({
+    where: { channel: 'INSTAGRAM', externalAccountId: accountId },
+    select: { id: true, tenantId: true },
+  });
+  if (exact) return exact;
+
+  const candidates = await prisma.channelConnection.findMany({
+    where: { channel: 'INSTAGRAM', status: 'connected' },
+    select: { id: true, tenantId: true, externalAccountId: true, displayName: true, metadata: true },
+  });
+
+  const byAlternate = candidates.find((candidate) =>
+    (((candidate.metadata as { accountIds?: unknown }).accountIds ?? []) as unknown[])
+      .map(String)
+      .includes(accountId),
+  );
+  if (byAlternate) {
+    await rememberInstagramAccountId(byAlternate.id, accountId).catch(() => undefined);
+    log?.info(
+      { accountId, connectionId: byAlternate.id },
+      'instagram webhook matched the account\'s alternate id — learned it for future events',
+    );
+    return { id: byAlternate.id, tenantId: byAlternate.tenantId };
+  }
+
+  if (candidates.length === 1) {
+    const only = candidates[0]!;
+    await rememberInstagramAccountId(only.id, accountId).catch(() => undefined);
+    log?.warn(
+      { accountId, storedAccountId: only.externalAccountId, connectionId: only.id },
+      'instagram webhook entry.id does not match the stored account id; attributing it to the only connected Instagram account and recording the id Meta actually uses',
+    );
+    return { id: only.id, tenantId: only.tenantId };
+  }
+
+  return null;
+}
+
+/** Record an id Meta actually used, so the next event matches on the fast path. */
+async function rememberInstagramAccountId(connectionId: string, accountId: string): Promise<void> {
+  const prisma = getPrisma();
+  const connection = await prisma.channelConnection.findUnique({
+    where: { id: connectionId },
+    select: { metadata: true },
+  });
+  if (!connection) return;
+  const metadata = (connection.metadata ?? {}) as Record<string, unknown>;
+  const known = new Set((((metadata.accountIds ?? []) as unknown[]) || []).map(String));
+  if (known.has(accountId)) return;
+  known.add(accountId);
+  await prisma.channelConnection.update({
+    where: { id: connectionId },
+    data: { metadata: { ...metadata, accountIds: [...known] } },
+  });
+}
+
 /** Called when a verified Instagram webhook arrives — proof the Meta config works. */
 export async function markInstagramWebhookVerified(tenantId: string): Promise<void> {
   await resolveManualAction(tenantId, 'meta-webhook-config');
@@ -335,6 +649,60 @@ export async function refreshInstagramTokenIfDue(connection: ChannelConnection):
   );
 }
 
+/** How old the stored token is, in days — null when it cannot be read. */
+export function instagramTokenAgeDays(connection: ChannelConnection): number | null {
+  if (!connection.credentialsEncrypted) return null;
+  try {
+    const creds = JSON.parse(
+      decryptSecret(connection.credentialsEncrypted, getEnv().ENCRYPTION_KEY),
+    ) as InstagramCredentials;
+    if (!creds.obtainedAt) return null;
+    return (Date.now() - creds.obtainedAt) / 86_400_000;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Has Meta EVER delivered anything for this account?
+ *
+ * Counted across both attributed and unattributed events. An event whose
+ * `entry.id` matched no connection is stored with a null tenantId, which is
+ * precisely the case an operator most needs to see — so a tenant-scoped count
+ * would hide the very evidence it exists to find. One Meta app per deployment
+ * makes the wider count unambiguous.
+ *
+ * Note the counts are a rolling window: processed events are pruned after 7
+ * days, so "zero" means "nothing in the last week", which for a live business
+ * account is still conclusive.
+ */
+export interface DeliveryEvidence {
+  comments: number;
+  messages: number;
+  connectionAgeHours: number;
+  /** 'none' — nothing at all arrives; 'comments-only' — DMs specifically blocked; 'flowing' — both seen. */
+  verdict: 'none' | 'comments-only' | 'flowing';
+}
+
+export async function readDeliveryEvidence(
+  connection: ChannelConnection,
+): Promise<DeliveryEvidence> {
+  const prisma = getPrisma();
+  const scope = { OR: [{ tenantId: connection.tenantId }, { tenantId: null }] };
+  const [comments, messages] = await Promise.all([
+    prisma.webhookEvent.count({
+      where: { channel: 'INSTAGRAM', eventKey: { startsWith: 'comment:' }, ...scope },
+    }),
+    prisma.webhookEvent.count({
+      where: { channel: 'INSTAGRAM', eventKey: { startsWith: 'message:' }, ...scope },
+    }),
+  ]);
+  const connectionAgeHours = (Date.now() - connection.createdAt.getTime()) / 3600_000;
+  const verdict =
+    messages > 0 ? 'flowing' : comments > 0 ? 'comments-only' : 'none';
+  return { comments, messages, connectionAgeHours, verdict };
+}
+
 /**
  * Are Instagram DMs actually being delivered to this server?
  *
@@ -353,16 +721,12 @@ export async function refreshInstagramTokenIfDue(connection: ChannelConnection):
  * inferred: a healthy number of comments with no messages at all means
  * delivery is off, not that nobody has written.
  */
-async function describeDmDelivery(tenantId: string): Promise<string> {
-  const prisma = getPrisma();
-  const [comments, messages] = await Promise.all([
-    prisma.webhookEvent.count({
-      where: { tenantId, channel: 'INSTAGRAM', eventKey: { startsWith: 'comment:' } },
-    }),
-    prisma.webhookEvent.count({
-      where: { tenantId, channel: 'INSTAGRAM', eventKey: { startsWith: 'message:' } },
-    }),
-  ]);
+async function describeDmDelivery(
+  connection: ChannelConnection,
+  evidence: DeliveryEvidence,
+): Promise<string> {
+  const tenantId = connection.tenantId;
+  const { comments, messages } = evidence;
 
   if (messages > 0) return `; DMs: ${messages} received`;
   // Too few comments to conclude anything — the account may just be quiet.
@@ -389,7 +753,58 @@ async function describeDmDelivery(tenantId: string): Promise<string> {
   return `; DMs: NONE EVER RECEIVED despite ${comments} comments — "Allow Access to Messages" is probably off (see Manual Actions)`;
 }
 
-/** Live health check (spec §27). */
+/**
+ * Nothing at all has ever arrived from Meta for this account.
+ *
+ * With the subscription confirmed, the remaining causes are all app-level and
+ * all invisible from here, so they are spelled out rather than guessed at. The
+ * verdict waits a day before it counts as a fault: a genuinely quiet account
+ * must not be reported as broken.
+ */
+async function raiseNeverDeliveredAction(
+  connection: ChannelConnection,
+  appUrl: string | undefined,
+  reachable: boolean,
+): Promise<void> {
+  await upsertManualAction(connection.tenantId, {
+    dedupKey: 'ig-nothing-ever-delivered',
+    platform: 'Meta',
+    title: 'Instagram has never delivered a single event to this server',
+    officialUrl: 'https://developers.facebook.com/apps/',
+    steps: [
+      `The token for ${connection.displayName} is valid and the account IS subscribed to comments and messages, yet not one comment and not one direct message has ever reached this server. Instagram has no polling mode, so this is the whole automation being silent, not a partial fault.`,
+      appUrl && !reachable
+        ? `BLOCKER — ${appUrl} does not reach this server: a request to ${appUrl}/api/health was answered by something else, or not at all. Meta delivers by POST only, so fix the hosting/DNS/TLS first. Meta also requires port 443 and a publicly-trusted certificate.`
+        : appUrl
+          ? `The callback address ${appUrl}/api/webhooks/instagram does reach this server, so the remaining causes are all in the Meta App Dashboard.`
+          : 'BLOCKER — APP_URL is not set, so there is no address to give Meta. Set APP_URL to this server\'s public HTTPS base URL and restart.',
+      'Check 1 — the app must be LIVE. App Dashboard → the toggle at the very top. Meta delivers no webhooks at all for an app in Development mode. This is the single most common cause.',
+      'Check 2 — the app-level webhook must be verified. App Dashboard → Instagram → "API setup with Instagram business login" → section 3 "Configure webhooks". The callback URL and verify token must be saved there and show as verified; subscribing the account (which this platform does automatically) is NOT enough on its own.',
+      'Check 3 — "comments" and "messages" must be ticked in that same section at app level.',
+      'Check 4 — comment webhooks require Advanced Access for instagram_business_manage_comments (App Review). Until it is granted, comments are not delivered even when everything else is correct.',
+      'Then comment on one of the account\'s posts from a different Instagram account, and press "Health check" here. If the account is simply quiet and nobody has written, this task can be dismissed.',
+    ],
+    expectedResult:
+      'A test comment or DM appears under Logs → webhook events within seconds, and this check reports events received.',
+    whatToReturn: 'Nothing — this task resolves itself as soon as the first event arrives.',
+  }).catch(() => undefined);
+}
+
+/**
+ * Live health check (spec §27).
+ *
+ * Deliberately NOT just "is the token valid". A valid token proves only that
+ * this server can call Instagram — it says nothing about Instagram being able
+ * to call this server, which is the direction every customer message travels.
+ * The old version checked the token and returned CONNECTED, which also meant
+ * it OVERWROTE the PERMISSION_REQUIRED that a failed subscription had set at
+ * connect time: fifteen minutes after a broken connect, the dashboard went
+ * green and stayed green while nothing was being delivered at all. Telegram
+ * never had that hole because `getWebhookInfo` reports delivery state on every
+ * check; this now does the equivalent.
+ *
+ * Order of severity: no token beats no subscription beats no deliveries.
+ */
 export async function checkInstagramHealth(connection: ChannelConnection): Promise<{
   status: 'CONNECTED' | 'DEGRADED' | 'AUTH_REQUIRED' | 'PERMISSION_REQUIRED' | 'DISCONNECTED';
   detail: string;
@@ -397,26 +812,11 @@ export async function checkInstagramHealth(connection: ChannelConnection): Promi
   if (connection.status !== 'connected' || !connection.credentialsEncrypted) {
     return { status: 'DISCONNECTED', detail: 'Not connected' };
   }
+
   const client = getInstagramClient(connection);
+  let me;
   try {
-    const me = await client.getMe();
-    // Opportunistic token refresh keeps the 60-day token alive indefinitely.
-    try {
-      await refreshInstagramTokenIfDue(connection);
-    } catch (err) {
-      return {
-        status: 'DEGRADED',
-        detail: `Token valid but refresh failed: ${errorMessage(err)}`,
-      };
-    }
-    const dm = await describeDmDelivery(connection.tenantId).catch(() => '');
-    if (dm.includes('received')) {
-      await resolveManualAction(connection.tenantId, 'ig-dm-never-delivered').catch(() => undefined);
-    }
-    return {
-      status: 'CONNECTED',
-      detail: `Token valid for @${me.username ?? connection.externalAccountId}${dm}`,
-    };
+    me = await client.getMe();
   } catch (err) {
     const msg = errorMessage(err);
     if (msg.includes('401') || msg.includes('code 190')) {
@@ -427,4 +827,304 @@ export async function checkInstagramHealth(connection: ChannelConnection): Promi
     }
     return { status: 'DEGRADED', detail: msg };
   }
+
+  const parts = [`Token valid for @${me.username ?? connection.externalAccountId}`];
+  let status: 'CONNECTED' | 'DEGRADED' | 'PERMISSION_REQUIRED' = 'CONNECTED';
+
+  // Opportunistic token refresh keeps the 60-day token alive indefinitely.
+  // A failed refresh is only an outage when the token is genuinely running
+  // out: reporting DEGRADED for a transient refresh error would light up the
+  // "automation is down" banner for days while every message was in fact being
+  // answered, which is the banner crying wolf rather than reporting anything.
+  try {
+    await refreshInstagramTokenIfDue(connection);
+  } catch (err) {
+    const ageDays = instagramTokenAgeDays(connection);
+    if (ageDays !== null && ageDays > 45) {
+      status = 'DEGRADED';
+      parts.push(
+        `token refresh is failing and the token is ${Math.round(ageDays)} days old — it expires at 60 days, so reconnect the account now (${errorMessage(err)})`,
+      );
+    } else {
+      parts.push(`token refresh failed, will retry (${errorMessage(err)})`);
+    }
+  }
+
+  // The check that decides whether anything can arrive at all. Also repairs a
+  // missing subscription, so a connect that failed this step heals itself.
+  const subscription = await ensureInstagramSubscription(connection).catch(() => null);
+  if (!subscription || !subscription.ok) {
+    return {
+      status: 'PERMISSION_REQUIRED',
+      detail: `${parts.join('; ')}; ${
+        subscription
+          ? subscriptionDetail(subscription)
+          : 'the webhook subscription could not be verified'
+      }`,
+    };
+  }
+  parts.push(subscriptionDetail(subscription));
+
+  // Delivery evidence. The subscription being right does not prove Meta is
+  // actually sending — the app also has to be Live with a verified app-level
+  // webhook, neither of which is readable from here.
+  const evidence = await readDeliveryEvidence(connection).catch(() => null);
+  if (evidence) {
+    if (evidence.verdict === 'none') {
+      const env = getEnv();
+      const appUrl = env.APP_URL?.replace(/\/$/, '');
+      const reachable = appUrl ? await isPubliclyReachable(appUrl) : false;
+      if (evidence.connectionAgeHours > 24) {
+        status = 'DEGRADED';
+        parts.push(
+          'NO EVENTS EVER RECEIVED — Instagram has delivered nothing since this account was connected. Most likely the app is still in Development mode or its app-level webhook is not verified; see Manual Actions',
+        );
+        await raiseNeverDeliveredAction(connection, appUrl, reachable).catch(() => undefined);
+      } else {
+        parts.push('no events received yet (connected less than a day ago)');
+      }
+    } else {
+      await resolveManualAction(connection.tenantId, 'ig-nothing-ever-delivered').catch(
+        () => undefined,
+      );
+      parts.push(`comments: ${evidence.comments} received`);
+      const dm = await describeDmDelivery(connection, evidence).catch(() => '');
+      if (evidence.messages > 0) {
+        await resolveManualAction(connection.tenantId, 'ig-dm-never-delivered').catch(
+          () => undefined,
+        );
+      }
+      if (dm) parts.push(dm.replace(/^;\s*/, ''));
+    }
+  }
+
+  return { status, detail: parts.join('; ') };
+}
+
+/**
+ * Everything that has to be true for an Instagram comment or DM to be
+ * answered, each checked and reported with its evidence.
+ *
+ * This exists because "Instagram is not working" was, in practice,
+ * undiagnosable from the dashboard: the connection said CONNECTED, no banner
+ * fired, the logs page showed nothing (events that match no account are stored
+ * without a tenant and were filtered out of it), and the actual cause — an
+ * account Meta was not subscribed to deliver — appeared in no view at all. One
+ * call now answers the question instead of a day of guessing.
+ */
+export interface InstagramDiagnosticCheck {
+  id: string;
+  title: string;
+  state: 'pass' | 'fail' | 'warn' | 'unknown';
+  detail: string;
+  /** Only set for a failing check: what to do about it. */
+  fix?: string;
+}
+
+export async function diagnoseInstagram(tenantId: string): Promise<{
+  ok: boolean;
+  summary: string;
+  checks: InstagramDiagnosticCheck[];
+}> {
+  const prisma = getPrisma();
+  const env = getEnv();
+  const checks: InstagramDiagnosticCheck[] = [];
+  const push = (check: InstagramDiagnosticCheck): void => void checks.push(check);
+
+  // 1. Is an account connected at all?
+  const connection = await prisma.channelConnection.findUnique({
+    where: { tenantId_channel: { tenantId, channel: 'INSTAGRAM' } },
+  });
+  if (!connection || connection.status !== 'connected' || !connection.credentialsEncrypted) {
+    push({
+      id: 'connection',
+      title: 'Instagram account connected',
+      state: 'fail',
+      detail: connection ? `Status is "${connection.status}"` : 'No Instagram connection exists',
+      fix: 'Connections page → Instagram → paste a 60-day Instagram access token and press Connect.',
+    });
+    return { ok: false, summary: 'No Instagram account is connected.', checks };
+  }
+  push({
+    id: 'connection',
+    title: 'Instagram account connected',
+    state: 'pass',
+    detail: `${connection.displayName} (account id ${connection.externalAccountId})`,
+  });
+
+  // 2. Public address Meta must be able to POST to.
+  const appUrl = env.APP_URL?.replace(/\/$/, '');
+  if (!appUrl) {
+    push({
+      id: 'app-url',
+      title: 'Public callback URL',
+      state: 'fail',
+      detail: 'APP_URL is not set, so there is no address to give Meta',
+      fix: "Set APP_URL to this server's public HTTPS base URL and restart.",
+    });
+  } else {
+    const reachable = await isPubliclyReachable(appUrl);
+    push({
+      id: 'app-url',
+      title: 'Public callback URL',
+      state: reachable ? 'pass' : 'fail',
+      detail: `${appUrl}/api/webhooks/instagram — ${reachable ? 'reaches this server' : 'does NOT reach this server'}`,
+      fix: reachable
+        ? undefined
+        : 'Meta delivers Instagram events by POST only. Route ports 80/443 to this server with a real domain and a publicly-trusted TLS certificate (Meta requires port 443 and rejects self-signed certificates).',
+    });
+  }
+
+  // 3. Verify token and app secret — without them the handshake and every
+  //    delivery are rejected, which looks exactly like Meta sending nothing.
+  const [verifyToken, appSecret, igAppSecret] = await Promise.all([
+    resolveGlobalSetting('META_VERIFY_TOKEN'),
+    resolveGlobalSetting('META_APP_SECRET'),
+    resolveGlobalSetting('META_IG_APP_SECRET'),
+  ]);
+  push({
+    id: 'verify-token',
+    title: 'Webhook verify token configured',
+    state: verifyToken ? 'pass' : 'fail',
+    detail: verifyToken
+      ? 'META_VERIFY_TOKEN is set'
+      : 'META_VERIFY_TOKEN is empty — the Meta "Verify and save" handshake will fail',
+    fix: verifyToken ? undefined : 'Settings page → set META_VERIFY_TOKEN, then paste the same value in the Meta App Dashboard.',
+  });
+  push({
+    id: 'app-secret',
+    title: 'App secret configured',
+    state: appSecret || igAppSecret ? 'pass' : 'fail',
+    detail:
+      appSecret && igAppSecret
+        ? 'both META_APP_SECRET and META_IG_APP_SECRET are set'
+        : appSecret
+          ? 'META_APP_SECRET is set (also set META_IG_APP_SECRET — an app using Instagram Login may sign with it)'
+          : igAppSecret
+            ? 'META_IG_APP_SECRET is set'
+            : 'no app secret is set — every delivery is rejected with 401',
+    fix:
+      appSecret || igAppSecret
+        ? undefined
+        : 'Settings page → set META_IG_APP_SECRET to the "Instagram app secret" shown under "API setup with Instagram business login".',
+  });
+
+  // 4. Token validity.
+  let tokenOk = false;
+  try {
+    const me = await getInstagramClient(connection).getMe();
+    tokenOk = true;
+    push({
+      id: 'token',
+      title: 'Access token valid',
+      state: 'pass',
+      detail: `@${me.username ?? connection.externalAccountId}${me.account_type ? ` (${me.account_type})` : ''}`,
+    });
+  } catch (err) {
+    // A network failure says nothing about the token, and telling the operator
+    // to re-generate a perfectly good one sends them down the wrong path.
+    const message = errorMessage(err);
+    const networkFailure = /network failure|fetch failed|ENOTFOUND|ETIMEDOUT|ECONNREFUSED/i.test(
+      message,
+    );
+    push({
+      id: 'token',
+      title: 'Access token valid',
+      state: networkFailure ? 'unknown' : 'fail',
+      detail: message,
+      fix: networkFailure
+        ? 'This server could not reach graph.instagram.com at all — check outbound internet access, DNS and any egress firewall. The token itself has not been shown to be wrong.'
+        : 'Re-generate the token in the Meta App Dashboard and paste it again on the Connections page.',
+    });
+  }
+
+  // 5. THE one that silently kills everything.
+  if (tokenOk) {
+    const subscription = await ensureInstagramSubscription(connection, { repair: false }).catch(
+      () => null,
+    );
+    push({
+      id: 'subscription',
+      title: 'Meta subscribed to deliver this account\'s events',
+      state: subscription?.ok ? 'pass' : 'fail',
+      detail: subscription
+        ? subscription.readable
+          ? `subscribed fields: ${subscription.fields.join(', ') || '(none)'}`
+          : `could not read the subscription: ${subscription.error ?? 'unknown error'}`
+        : 'check failed',
+      fix: subscription?.ok
+        ? undefined
+        : 'Press "Health check" — the platform re-subscribes automatically. If it still fails, the token lacks instagram_business_manage_comments / instagram_business_manage_messages: re-generate it approving all three permissions.',
+    });
+  }
+
+  // 6. Did anything actually arrive?
+  const evidence = await readDeliveryEvidence(connection).catch(() => null);
+  if (evidence) {
+    push({
+      id: 'delivery',
+      title: 'Events actually delivered by Meta',
+      state:
+        evidence.verdict === 'flowing'
+          ? 'pass'
+          : evidence.verdict === 'comments-only'
+            ? 'warn'
+            : evidence.connectionAgeHours > 24
+              ? 'fail'
+              : 'unknown',
+      detail: `${evidence.comments} comment events, ${evidence.messages} message events (last 7 days)`,
+      fix:
+        evidence.verdict === 'none'
+          ? 'Set the app to LIVE in the Meta App Dashboard and verify the app-level webhook (Instagram → Configure webhooks). Meta delivers nothing for an app in Development mode.'
+          : evidence.verdict === 'comments-only'
+            ? 'Comments arrive but DMs never do: on the phone, Instagram app → Settings and privacy → Messages and story replies → Message controls → Connected tools → turn "Allow Access to Messages" ON.'
+            : undefined,
+    });
+
+    // Events that matched no account are the signature of an id mismatch and
+    // are invisible everywhere else, so they are called out explicitly.
+    const unattributed = await prisma.webhookEvent.count({
+      where: { channel: 'INSTAGRAM', tenantId: null },
+    });
+    if (unattributed > 0) {
+      push({
+        id: 'account-match',
+        title: 'Delivered events match the connected account',
+        state: 'fail',
+        detail: `${unattributed} Instagram events arrived whose account id matched no connection — they were discarded`,
+        fix: 'Reconnect the Instagram account on the Connections page: the token in use belongs to a different account than the one Meta is delivering for.',
+      });
+    }
+  }
+
+  // 7. Are the agents even switched on? A perfect pipeline that replies to
+  //    nobody is the other way this looks "broken".
+  const agents = await prisma.agent.findMany({
+    where: { tenantId, type: { in: ['INSTAGRAM_COMMENT', 'INSTAGRAM_DM'] } },
+    select: { type: true, enabled: true, name: true },
+  });
+  for (const type of ['INSTAGRAM_COMMENT', 'INSTAGRAM_DM'] as const) {
+    const agent = agents.find((a) => a.type === type);
+    push({
+      id: `agent-${type.toLowerCase()}`,
+      title: `${type === 'INSTAGRAM_COMMENT' ? 'Comment' : 'Direct message'} agent enabled`,
+      state: agent?.enabled ? 'pass' : 'fail',
+      detail: agent
+        ? agent.enabled
+          ? `${agent.name} is enabled`
+          : `${agent.name} exists but is switched OFF — events are recorded and never answered`
+        : 'no agent of this type exists',
+      fix: agent?.enabled ? undefined : 'Agents page → enable it.',
+    });
+  }
+
+  const failed = checks.filter((c) => c.state === 'fail');
+  return {
+    ok: failed.length === 0,
+    summary:
+      failed.length === 0
+        ? 'Every requirement for Instagram automation is satisfied.'
+        : `${failed.length} blocking problem${failed.length === 1 ? '' : 's'}: ${failed.map((c) => c.title).join('; ')}.`,
+    checks,
+  };
 }

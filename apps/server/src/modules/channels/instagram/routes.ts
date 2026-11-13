@@ -1,9 +1,8 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { getPrisma } from '../../../db/client.js';
 import { hmacSha256Hex, safeEqual } from '../../../lib/crypto.js';
 import { resolveGlobalSetting } from '../../settings/service.js';
 import { recordAndEnqueueEvent } from '../../webhooks/service.js';
-import { markInstagramWebhookVerified } from './service.js';
+import { markInstagramWebhookVerified, resolveInstagramConnection } from './service.js';
 
 /**
  * Meta webhook endpoint for Instagram (object: "instagram").
@@ -85,7 +84,6 @@ export async function instagramWebhookRoutes(app: FastifyInstance): Promise<void
     // Meta batches up to 1000 updates per POST and expects a 200 within ~5s.
     // Lookups are memoized per account id and entries persist in parallel, so
     // latency is bounded by the slowest entry, not the sum of all of them.
-    const prisma = getPrisma();
     const connectionCache = new Map<string, Promise<{ id: string; tenantId: string } | null>>();
     const verifiedTenants = new Set<string>();
 
@@ -93,16 +91,20 @@ export async function instagramWebhookRoutes(app: FastifyInstance): Promise<void
       body.entry.map(async (entry) => {
         const accountId = String(entry.id);
         if (!connectionCache.has(accountId)) {
-          connectionCache.set(
-            accountId,
-            prisma.channelConnection.findFirst({
-              where: { channel: 'INSTAGRAM', externalAccountId: accountId },
-              select: { id: true, tenantId: true },
-            }),
-          );
+          connectionCache.set(accountId, resolveInstagramConnection(accountId, req.log));
         }
         const connection = await connectionCache.get(accountId)!;
         const tenantId = connection?.tenantId ?? null;
+        if (!connection) {
+          // Worth a loud line: from the operator's side this is identical to
+          // Meta sending nothing, and it is the one cause that leaves no trace
+          // anywhere else (the event is stored with no tenant, so the Logs
+          // page filters it out).
+          req.log.error(
+            { accountId },
+            'instagram webhook for an account that matches NO connection — the event will be discarded. The connected token belongs to a different Instagram account than the one Meta is delivering for; reconnect it on the Connections page.',
+          );
+        }
         if (tenantId && !verifiedTenants.has(tenantId)) {
           verifiedTenants.add(tenantId);
           // First verified delivery proves the Meta dashboard config works.

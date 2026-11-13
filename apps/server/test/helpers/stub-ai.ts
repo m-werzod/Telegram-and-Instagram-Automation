@@ -39,6 +39,24 @@ export class StubAIProvider implements AIProvider {
     this.queue.push(decision);
   }
 
+  /**
+   * Forget everything from the previous test.
+   *
+   * Without this the stub is shared state across a whole file: recorded calls
+   * accumulate, so `expect(ai.calls).toHaveLength(0)` fails on the first test
+   * that follows one which answered anything, and — worse — a queued response
+   * that the previous test never consumed is served to the NEXT test, which
+   * then asserts against an answer it did not ask for. Six of the nine
+   * end-to-end flow tests were failing for exactly that reason, including both
+   * Instagram flows, which is how the integration suite stopped being able to
+   * catch an Instagram regression at all.
+   */
+  reset(): void {
+    this.calls = [];
+    this.queue = [];
+    this.refuseNext = false;
+  }
+
   async generateStructured<T>(params: GenerateStructuredParams<T>): Promise<GenerateResult<T>> {
     this.calls.push(params as GenerateStructuredParams<unknown>);
     if (this.refuseNext) {

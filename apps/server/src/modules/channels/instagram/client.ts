@@ -8,6 +8,7 @@ import { ExternalApiError, RateLimitedError } from '../../../lib/errors.js';
  *  - GET  /me                      — token validation + account identity
  *  - POST /{comment-id}/replies    — public comment reply
  *  - POST /me/messages             — DMs (recipient.id) and private replies (recipient.comment_id)
+ *  - GET  /me/subscribed_apps      — which webhook fields are actually live
  *  - POST /me/subscribed_apps      — per-account webhook enablement
  *  - GET  /refresh_access_token    — 60-day token refresh
  *  - GET  /{IGSID}                 — user profile (requires user consent via messaging)
@@ -33,6 +34,13 @@ export interface IgUserProfile {
   follower_count?: number;
   is_verified_user?: boolean;
   is_user_follow_business?: boolean;
+}
+
+export interface IgSubscription {
+  /** The app's own id/name, as Meta reports it for this subscription. */
+  id?: string;
+  name?: string;
+  subscribed_fields?: string[];
 }
 
 interface IgError {
@@ -154,6 +162,22 @@ export class InstagramClient {
         message: { attachment: { type: 'image', payload: { url: imageUrl } } },
       },
     });
+  }
+
+  /**
+   * Which webhook fields this account is ACTUALLY subscribed to, read back
+   * from Meta rather than assumed.
+   *
+   * This is the one call that can tell "connected" apart from "connected and
+   * actually receiving events". Everything else about an Instagram connection
+   * can be perfect — valid token, right account, correct app secret — and not
+   * a single comment or DM will ever arrive if this edge is empty, and no
+   * other endpoint reports that as a problem. See the subscription check in
+   * ./service.ts for why that matters more here than on any other channel.
+   */
+  async getSubscribedApps(): Promise<IgSubscription[]> {
+    const res = await this.request<{ data?: IgSubscription[] }>('GET', '/me/subscribed_apps');
+    return Array.isArray(res?.data) ? res.data : [];
   }
 
   /** Enable webhook delivery for this account (required in addition to app-level config). */

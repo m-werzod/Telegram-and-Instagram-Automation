@@ -5,6 +5,7 @@ import { NotFoundError, ValidationError } from '../lib/errors.js';
 import {
   checkInstagramHealth,
   connectInstagram,
+  diagnoseInstagram,
   disconnectInstagram,
 } from '../modules/channels/instagram/service.js';
 import {
@@ -67,6 +68,20 @@ export async function connectionRoutes(app: FastifyInstance): Promise<void> {
     if (!token.success) throw new ValidationError('accessToken is required');
     const connection = await connectInstagram(tenantOf(req), token.data);
     return { connection: publicConnection(connection) };
+  });
+
+  /**
+   * Why is Instagram not answering anybody?
+   *
+   * Every precondition for an Instagram comment or DM to be answered, checked
+   * live and reported with its evidence. It exists because this question used
+   * to be unanswerable from the dashboard: the connection read CONNECTED, no
+   * banner fired, and the actual cause — Meta not being subscribed to deliver
+   * the account's events — showed up in no view at all.
+   */
+  app.get('/api/connections/instagram/diagnose', async (req) => {
+    requireAdmin(req);
+    return diagnoseInstagram(tenantOf(req));
   });
 
   app.post('/api/connections/telegram/reconfigure-webhook', async (req) => {

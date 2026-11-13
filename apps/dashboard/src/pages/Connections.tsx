@@ -5,6 +5,7 @@ import IconChip from '../components/IconChip';
 import QueryError from '../components/QueryError';
 import InstagramIcon from '../components/InstagramIcon';
 import ChannelAccountCard from '../components/ChannelAccountCard';
+import InstagramDiagnostics from '../components/InstagramDiagnostics';
 
 export { HealthBadge } from '../components/ChannelAccountCard';
 
@@ -58,6 +59,7 @@ export default function Connections({ isAdmin }: { isAdmin: boolean }) {
         tokenHint={INSTAGRAM_TOKEN_HINT}
         switchHint={INSTAGRAM_SWITCH_HINT}
       />
+      {isAdmin && <InstagramDiagnostics />}
       <ChannelAccountCard
         title="Telegram"
         icon={Send}

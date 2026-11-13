@@ -78,8 +78,10 @@ export default function AutomationDownBanner({ isAdmin }: { isAdmin: boolean }) 
                   <strong>{c.displayName}</strong> — {c.detail || c.healthStatus}
                 </div>
               ))}
-              Tokenni yangilang: <strong>Ulanishlar</strong> sahifasida akkauntni qayta ulang.
-              Gaplashuvlar kelayotgan bo‘lsa ham, javob yuborilmaydi.
+              Yuqoridagi sabab nimani ko‘rsatsa, shuni tuzatish kerak: token eskirgan bo‘lsa
+              — <strong>Ulanishlar</strong> sahifasida akkauntni qayta ulang; Instagram
+              xabarlarni yubormayotgan bo‘lsa — o‘sha sahifadagi{' '}
+              <strong>"Instagram nega javob bermayapti?"</strong> tekshiruvini ishga tushiring.
             </>
           ) : s.keyRejected ? (
             <>

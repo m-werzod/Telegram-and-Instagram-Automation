@@ -72,6 +72,18 @@ async function main(): Promise<void> {
     logger.warn({ err: errorMessage(err) }, 'failed to resume telegram polling');
   }
 
+  // Instagram has no transport to re-arm locally, but it does have one at
+  // Meta: the per-account webhook subscription. It is verified (and silently
+  // repaired) at every boot, because without it Meta delivers nothing at all
+  // and — unlike Telegram, which falls back to long-polling — there is no
+  // second path for a customer message to arrive on.
+  try {
+    const { ensureInstagramDelivery } = await import('./modules/channels/instagram/service.js');
+    await ensureInstagramDelivery();
+  } catch (err) {
+    logger.warn({ err: errorMessage(err) }, 'instagram delivery check failed');
+  }
+
   // The staff CRM bot is a separate bot on its own transport: if its token is
   // missing or rejected it logs and stays off, never affecting the
   // customer-facing automation.
@@ -99,6 +111,9 @@ async function main(): Promise<void> {
       void runHealthChecks().catch(() => undefined);
       void runAIKeyHealthCheck().catch(() => undefined);
       void recoverStuckEvents().catch(() => undefined);
+      void import('./modules/channels/instagram/service.js')
+        .then((m) => m.ensureInstagramDelivery())
+        .catch(() => undefined);
       void pruneOldRecords().catch(() => undefined);
       void enqueueScheduledMessages().catch(() => undefined);
     },

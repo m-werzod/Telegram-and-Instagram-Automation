@@ -76,6 +76,11 @@ d('end-to-end flows', () => {
   });
 
   beforeEach(async () => {
+    // The AI stub outlives a single test (it is installed once in beforeAll),
+    // so its recorded calls and any response it was handed but never used must
+    // be cleared or they bleed into the next test.
+    ai.reset();
+
     // Clean slate per test (FK-safe order via cascade truncate).
     await prisma.$executeRawUnsafe(`
       TRUNCATE TABLE "AuditLog","IdempotencyKey","ManualAction","HumanHandoff","CrmNote",
@@ -332,7 +337,15 @@ d('end-to-end flows', () => {
     expect(fetchCalls.filter((c) => c.url.includes('/sendMessage'))).toHaveLength(1);
   });
 
-  it('escalation → handoff created, conversation paused, follow-ups stay silent', async () => {
+  /**
+   * Escalating while still answering is a FLAG, not a handover.
+   *
+   * Pausing the conversation here would mute it permanently — every later
+   * message gets skipped, so a single "I'll check that and get back to you"
+   * silently ends the relationship. Only a turn that produced no reply is a
+   * real handover (see `escalate()` in the pipeline).
+   */
+  it('escalation alongside a reply → handoff opened, conversation stays active', async () => {
     ai.respondWith({
       reply: 'I will get a human to help you.',
       shouldEscalate: true,
@@ -343,13 +356,38 @@ d('end-to-end flows', () => {
 
     const handoff = await prisma.humanHandoff.findFirstOrThrow({ where: { tenantId } });
     expect(handoff.status).toBe('OPEN');
+    expect(handoff.reason).toContain('human');
+
+    const conversation = await prisma.conversation.findFirstOrThrow({ where: { tenantId } });
+    expect(conversation.status).toBe('ACTIVE');
+    expect(conversation.handedOffAt).toBeNull();
+
+    // The customer was answered, so a follow-up is still answered.
+    ai.respondWith({ reply: 'Meanwhile, here is what I can tell you.' });
+    await postTelegramUpdate(1005, 'hello??');
+    expect(fetchCalls.filter((c) => c.url.includes('/sendMessage'))).toHaveLength(2);
+  });
+
+  it('escalation with NO reply → conversation handed off, follow-ups stay silent', async () => {
+    // reply: null is a turn the agent did not answer — a genuine handover.
+    ai.respondWith({
+      reply: null,
+      shouldEscalate: true,
+      escalationReason: 'complaint needs a human',
+    });
+
+    await postTelegramUpdate(1006, 'This is unacceptable, I want a manager');
+
+    const handoff = await prisma.humanHandoff.findFirstOrThrow({ where: { tenantId } });
+    expect(handoff.status).toBe('OPEN');
     const conversation = await prisma.conversation.findFirstOrThrow({ where: { tenantId } });
     expect(conversation.status).toBe('HANDED_OFF');
+    expect(conversation.handedOffAt).not.toBeNull();
 
     // Follow-up message: recorded but no AI generation, no send.
     const aiCallsBefore = ai.calls.length;
     const sendsBefore = fetchCalls.filter((c) => c.url.includes('/sendMessage')).length;
-    await postTelegramUpdate(1005, 'hello??');
+    await postTelegramUpdate(1007, 'hello??');
     expect(ai.calls.length).toBe(aiCallsBefore);
     expect(fetchCalls.filter((c) => c.url.includes('/sendMessage')).length).toBe(sendsBefore);
     const inbound = await prisma.conversationMessage.findMany({
@@ -434,6 +472,86 @@ d('end-to-end flows', () => {
     const events = await prisma.webhookEvent.findMany({ where: { tenantId } });
     expect(events).toHaveLength(0);
     expect(ai.calls).toHaveLength(0);
+  });
+
+  /**
+   * The webhook carries the account's OTHER id.
+   *
+   * Meta publishes two identifiers for the same professional account — the
+   * `user_id` and the app-scoped `id` from `GET /me` — and which one lands in
+   * `entry.id` has moved between apps and API versions. A plain equality match
+   * on the stored one dropped every event, with no error logged at either end
+   * and nothing visible on the Logs page (an unmatched event is stored with no
+   * tenant), which is indistinguishable from Instagram sending nothing at all.
+   */
+  it('a DM whose entry.id is the account\'s other id is still answered', async () => {
+    ai.respondWith({ reply: 'Ha, bor!' });
+
+    const payload = dmPayload('mid-alt-id', 'Bormi?', 'igsid-alt');
+    (payload.entry[0] as { id: string }).id = '99999999999999999'; // the other id
+
+    const res = await postInstagram(payload);
+    expect(res.statusCode).toBe(200);
+
+    const dmSend = fetchCalls.find(
+      (c) => c.url.includes('/me/messages') && c.body?.recipient?.id === 'igsid-alt',
+    );
+    expect(dmSend).toBeTruthy();
+
+    const event = await prisma.webhookEvent.findFirstOrThrow({ where: { tenantId } });
+    expect(event.status).toBe('PROCESSED');
+
+    // The id Meta actually uses is learned, so the next event matches directly.
+    const connection = await prisma.channelConnection.findUniqueOrThrow({
+      where: { tenantId_channel: { tenantId, channel: 'INSTAGRAM' } },
+    });
+    expect((connection.metadata as { accountIds?: string[] }).accountIds).toContain(
+      '99999999999999999',
+    );
+  });
+
+  /**
+   * A photo, voice note or shared post. This used to return before storing
+   * anything — the customer got silence and the operator saw no trace of them
+   * having written at all.
+   */
+  it('a non-text DM is recorded and answered with a request to write in Uzbek', async () => {
+    const payload = {
+      object: 'instagram',
+      entry: [
+        {
+          id: IG_ACCOUNT,
+          messaging: [
+            {
+              sender: { id: 'igsid-photo' },
+              recipient: { id: IG_ACCOUNT },
+              timestamp: Date.now(),
+              message: { mid: 'mid-photo-1', attachments: [{ type: 'image' }] },
+            },
+          ],
+        },
+      ],
+    };
+
+    const res = await postInstagram(payload);
+    expect(res.statusCode).toBe(200);
+
+    const inbound = await prisma.conversationMessage.findFirstOrThrow({
+      where: { tenantId, direction: 'INBOUND' },
+    });
+    expect(inbound.content).toBe('(image)');
+    expect(inbound.externalMessageId).toBe('mid-photo-1');
+
+    const reply = fetchCalls.find(
+      (c) => c.url.includes('/me/messages') && c.body?.recipient?.id === 'igsid-photo',
+    );
+    expect(reply).toBeTruthy();
+    expect(reply!.body.message.text).toMatch(/matn/i);
+
+    // No model run is needed to say "please write it".
+    expect(ai.calls).toHaveLength(0);
+    const event = await prisma.webhookEvent.findFirstOrThrow({ where: { tenantId } });
+    expect(event.status).toBe('PROCESSED');
   });
 
   it('same person: second DM reuses the lead (identity resolution, spec §9)', async () => {

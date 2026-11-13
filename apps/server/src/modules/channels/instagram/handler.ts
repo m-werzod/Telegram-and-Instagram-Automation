@@ -5,11 +5,12 @@ import { AppError, errorMessage, isRetryable } from '../../../lib/errors.js';
 import { childLogger } from '../../../lib/logger.js';
 import { findOrCreateLead } from '../../crm/service.js';
 import { isTrivialComment, parseAgentSettings } from '../../engine/business-rules.js';
+import { VOICE_NOT_SUPPORTED_REPLY } from '../../engine/language.js';
 import { runAgentPipeline } from '../../engine/pipeline.js';
 import { getMediaAssetWithData, publicMediaUrl } from '../../media/service.js';
 import { claimIdempotency, releaseIdempotency } from '../shared/idempotency.js';
 import type { InstagramClient } from './client.js';
-import { getInstagramClient } from './service.js';
+import { getInstagramClient, resolveInstagramConnection } from './service.js';
 
 /**
  * Make the account behave like a person who is actually there: mark the
@@ -63,7 +64,13 @@ interface MessagingItem {
   sender?: { id?: string };
   recipient?: { id?: string };
   timestamp?: number;
-  message?: { mid?: string; text?: string; is_echo?: boolean };
+  message?: {
+    mid?: string;
+    text?: string;
+    is_echo?: boolean;
+    /** Photos, voice notes, stickers, shared posts and story replies. */
+    attachments?: Array<{ type?: string }>;
+  };
 }
 
 export async function processInstagramEvent(event: WebhookEvent): Promise<void> {
@@ -76,11 +83,19 @@ export async function processInstagramEvent(event: WebhookEvent): Promise<void> 
   };
   const prisma = getPrisma();
 
-  const connection = await prisma.channelConnection.findFirst({
-    where: { channel: 'INSTAGRAM', externalAccountId: payload.accountId },
-  });
+  // Resolved the same tolerant way the webhook route does it, so an event is
+  // never accepted at the door and then dropped here because `entry.id` is the
+  // account's other identifier.
+  const match = await resolveInstagramConnection(payload.accountId);
+  const connection = match
+    ? await prisma.channelConnection.findUnique({ where: { id: match.id } })
+    : null;
   if (!connection || connection.status !== 'connected') {
-    await markEvent(event.id, 'SKIPPED', 'no connected Instagram account for this entry id');
+    await markEvent(
+      event.id,
+      'SKIPPED',
+      `no connected Instagram account for entry id ${payload.accountId} — the stored token belongs to a different account; reconnect Instagram`,
+    );
     return;
   }
 
@@ -305,10 +320,17 @@ async function processDm(
     await markEvent(event.id, 'SKIPPED', 'echo of our own message');
     return;
   }
-  if (!text) {
-    await markEvent(event.id, 'SKIPPED', 'non-text message (attachment/sticker) — recorded only');
-    return;
-  }
+  // A photo, voice note, sticker or shared post used to be dropped right here
+  // — not even stored, despite the log line claiming "recorded only". The
+  // customer got total silence and the operator saw no trace of them ever
+  // having written. It is now recorded like any other message, and answered
+  // the same way the Telegram channel already answers a voice note: by asking
+  // for it in writing.
+  const attachmentTypes = (messaging.message?.attachments ?? [])
+    .map((attachment) => attachment.type)
+    .filter((type): type is string => Boolean(type));
+  const isNonText = !text;
+  const inboundContent = text || `(${attachmentTypes.join(', ') || 'non-text message'})`;
 
   const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
   if (!tenant) {
@@ -367,9 +389,12 @@ async function processDm(
         tenantId,
         direction: 'INBOUND',
         role: 'USER',
-        content: text,
+        content: inboundContent,
         externalMessageId: mid,
-        metadata: { timestamp: messaging.timestamp ?? null },
+        metadata: {
+          timestamp: messaging.timestamp ?? null,
+          ...(isNonText ? { nonText: true, attachmentTypes } : {}),
+        },
       },
     });
   } catch (err) {
@@ -390,6 +415,40 @@ async function processDm(
   const eventAgeMs = messaging.timestamp ? Date.now() - Number(messaging.timestamp) : 0;
   if (eventAgeMs > 23.5 * 3600_000) {
     await markEvent(event.id, 'SKIPPED', 'inbound message older than the 24h messaging window');
+    return;
+  }
+
+  // A non-text message needs no model run: ask for it in writing, once, and
+  // stop. Guarded by the same idempotency claim as any other send so a queue
+  // retry cannot repeat it.
+  if (isNonText) {
+    if (await claimIdempotency(tenantId, `ig_dm_nontext:${mid}`)) {
+      try {
+        const res = await client.sendMessage(igsid, VOICE_NOT_SUPPORTED_REPLY);
+        await prisma.conversationMessage.create({
+          data: {
+            conversationId: conversation.id,
+            tenantId,
+            direction: 'OUTBOUND',
+            role: 'AGENT',
+            content: VOICE_NOT_SUPPORTED_REPLY,
+            externalMessageId: res.message_id ?? `dm:${mid}:nontext`,
+            metadata: { type: 'nontext_prompt', attachmentTypes },
+          },
+        });
+      } catch (err) {
+        if (isRetryable(err)) {
+          await releaseIdempotency(tenantId, `ig_dm_nontext:${mid}`);
+          throw err;
+        }
+        log.warn({ err: errorMessage(err) }, 'could not answer a non-text DM');
+      }
+    }
+    await markEvent(
+      event.id,
+      'PROCESSED',
+      `non-text message (${attachmentTypes.join(', ') || 'unknown'}) — asked the customer to write in Uzbek`,
+    );
     return;
   }
 
@@ -456,9 +515,12 @@ async function processDm(
       const imageUrl = publicMediaUrl(outcome.verdict.imageId);
       if (!imageUrl) {
         log.warn('image requested but APP_URL is not a public HTTPS URL — skipping image');
-      } else if (await claimIdempotency(tenantId, `ig_dm_image:${mid}`)) {
+      } else {
+        // Asset lookup BEFORE the claim: claiming first and then finding no
+        // asset burns the one-shot key, so a retry that could have sent the
+        // image is silently skipped for ever.
         const asset = await getMediaAssetWithData(tenantId, outcome.verdict.imageId);
-        if (asset) {
+        if (asset && (await claimIdempotency(tenantId, `ig_dm_image:${mid}`))) {
           try {
             const imgRes = await client.sendImageMessage(igsid, imageUrl);
             await prisma.conversationMessage.create({
